@@ -1,16 +1,3 @@
----
-title: "Untitled"
-output: html_document
-date: "2025-06-27"
-editor_options: 
-  markdown: 
-    wrap: 72
----
-
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-```
-
 # Synergy HTX Plate Reader Analysis Pipeline
 
 A comprehensive R package for analyzing growth curve data from BioTek
