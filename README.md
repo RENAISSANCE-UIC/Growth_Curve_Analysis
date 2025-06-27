@@ -1,5 +1,5 @@
 
-#Synergy HTX Plate Reader Analysis Pipeline
+# Synergy HTX Plate Reader Analysis Pipeline
 
 A comprehensive R package for analyzing growth curve data from BioTek Synergy HTX plate readers, supporting both Excel (.xlsx) and CSV file formats with single or multi-wavelength measurements.
 
