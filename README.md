@@ -24,7 +24,6 @@ formats with single or multi-wavelength measurements.
 
 -   **Rich Visualizations:** Growth curves, plate heatmaps, and
     comparative plots
-   
 
 ## Experimental Layout
 
@@ -58,12 +57,16 @@ install.packages(c(
 
 2.  Source the main script:
 
-`source("BioTek_Synergy_HTX_Processing.R")`
+``` R
+source("BioTek_Synergy_HTX_Processing.R")
+```
 
 3.  Set up your workspace (optional):
 
-\# Creates a project directory on your Desktop workspace \<-
-setup_workspace()
+``` R
+# Creates a project directory on your Desktop 
+workspace <- setup_workspace()
+```
 
 ## Quick Start
 
