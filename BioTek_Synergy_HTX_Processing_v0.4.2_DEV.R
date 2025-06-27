@@ -28,7 +28,7 @@ library(patchwork)
 #' @export
 setup_workspace <- function(working_directory = NULL, 
                             project_subdir = "Microbial_Growth_Curves_Analysis") 
-  {
+{
   if (is.null(working_directory)) {
     # Use the user's home directory as a base
     home_dir <- path.expand("~")
@@ -137,7 +137,7 @@ extract_metadata <- function(metadata_raw) {
 clean_metadata_values <- function(parameter, value) {
   case_when(
     parameter == "Date" & str_detect(value, "^\\d+$") ~ {
-      # Suppress expected warnings about date conversion
+      # Excel numeric date
       suppressWarnings({
         tryCatch(
           as.character(as.Date(as.numeric(value), origin = "1899-12-30")),
@@ -145,8 +145,12 @@ clean_metadata_values <- function(parameter, value) {
         )
       })
     },
+    parameter == "Date" & str_detect(value, "^\\d{1,2}/\\d{1,2}/\\d{4}$") ~ {
+      # CSV date format MM/DD/YYYY or DD/MM/YYYY
+      value  # Keep as-is, could add parsing if needed
+    },
     parameter == "Time" & str_detect(value, "^0\\.") ~ {
-      # Suppress expected warnings about time conversion
+      # Excel decimal time
       suppressWarnings({
         tryCatch({
           time_decimal <- as.numeric(value)
@@ -156,6 +160,10 @@ clean_metadata_values <- function(parameter, value) {
           sprintf("%02d:%02d:%02d", hours, minutes, seconds)
         }, error = function(e) value)
       })
+    },
+    parameter == "Time" & str_detect(value, "^\\d{1,2}:\\d{2}(:\\d{2})?$") ~ {
+      # CSV time format HH:MM:SS or HH:MM
+      value  # Keep as-is
     },
     TRUE ~ value
   )
@@ -705,8 +713,18 @@ print_layout_summary <- function() {
 #' Main data processing function
 process_synergy_file <- function(file_path, sheet_name = NULL, layout_type = "default") {
   
-  # Read raw data
-  synergy_data <- read_synergy_htx_file(file_path, sheet_name)
+  # Detect file type
+  file_ext <- tools::file_ext(tolower(file_path))
+  
+  if (file_ext == "csv") {
+    # Read CSV data
+    synergy_data <- read_synergy_htx_csv_file(file_path)
+  } else if (file_ext %in% c("xlsx", "xls")) {
+    # Read Excel data
+    synergy_data <- read_synergy_htx_file(file_path, sheet_name)
+  } else {
+    stop("Unsupported file format. Please use .xlsx, .xls, or .csv files.")
+  }
   
   # Create layout
   layout_info <- create_experiment_layout(layout_type)
@@ -733,8 +751,18 @@ process_synergy_file <- function(file_path, sheet_name = NULL, layout_type = "de
 #' Process multi-wavelength data with layout
 process_synergy_file_multi <- function(file_path, sheet_name = NULL, layout_type = "default") {
   
-  # Read raw data with multiple wavelengths
-  synergy_data <- read_synergy_htx_file_multi(file_path, sheet_name)
+  # Detect file type
+  file_ext <- tools::file_ext(tolower(file_path))
+  
+  if (file_ext == "csv") {
+    # Read CSV data with multiple wavelengths
+    synergy_data <- read_synergy_htx_csv_file_multi(file_path)
+  } else if (file_ext %in% c("xlsx", "xls")) {
+    # Read Excel data with multiple wavelengths
+    synergy_data <- read_synergy_htx_file_multi(file_path, sheet_name)
+  } else {
+    stop("Unsupported file format. Please use .xlsx, .xls, or .csv files.")
+  }
   
   # Create layout (same for all wavelengths)
   layout_info <- create_experiment_layout(layout_type)
@@ -1037,20 +1065,26 @@ summarize_replicate_results <- function(corrected_results) {
   ))
 }
 
-#' Overall experiment summary
+#' Create experiment summary with safe statistics
 create_experiment_summary <- function(corrected_results) {
   
   data <- corrected_results$corrected_data
   
-  # Basic experiment info
+  # Basic experiment info with safe statistics
   basic_info <- data %>%
     summarise(
       total_wells = n_distinct(well_id),
       total_timepoints = n_distinct(time_point),
-      experiment_duration_hrs = max(time_hrs) - min(time_hrs),
-      sampling_interval_hrs = round(mean(diff(sort(unique(time_hrs)))), 2),
-      temperature_range = paste(round(min(temperature, na.rm = TRUE), 1), "-", 
-                                round(max(temperature, na.rm = TRUE), 1), "°C")
+      experiment_duration_hrs = safe_max(time_hrs) - safe_min(time_hrs),
+      sampling_interval_hrs = ifelse(
+        length(unique(time_hrs)) > 1,
+        round(mean(diff(sort(unique(time_hrs))), na.rm = TRUE), 2),
+        NA_real_
+      ),
+      temperature_range = paste(
+        round(safe_min(temperature, na.rm = TRUE), 1), "-", 
+        round(safe_max(temperature, na.rm = TRUE), 1), "°C"
+      )
     )
   
   # Sample distribution
@@ -1073,28 +1107,36 @@ create_experiment_summary <- function(corrected_results) {
   ))
 }
 
-#' Calculate growth metrics for each condition
+#' Calculate growth metrics with safe statistics
 calculate_growth_metrics_summary <- function(corrected_results) {
   
-  # Per-well metrics
+  # Per-well metrics with safe calculations
   well_metrics <- corrected_results$corrected_data %>%
     filter(sample_type %in% c("sample", "untreated_control")) %>%
     group_by(well_id, sample_type, concentration, replicate_id) %>%
-    summarise(
+    safe_summarise(
       initial_od = first(od600_final),
       final_od = last(od600_final),
-      max_od = max(od600_final, na.rm = TRUE),
-      time_to_max_hrs = time_hrs[which.max(od600_final)],
+      max_od = safe_max(od600_final, na.rm = TRUE),
+      time_to_max_hrs = ifelse(
+        length(od600_final) > 0 && !all(is.na(od600_final)),
+        time_hrs[which.max(od600_final)],
+        NA_real_
+      ),
       total_growth = final_od - initial_od,
       max_growth = max_od - initial_od,
-      auc = sum(od600_final * mean(diff(time_hrs), na.rm = TRUE), na.rm = TRUE),
+      auc = sum(od600_final * 
+                  ifelse(length(unique(time_hrs)) > 1,
+                         mean(diff(sort(unique(time_hrs))), na.rm = TRUE),
+                         1), 
+                na.rm = TRUE),
       .groups = "drop"
     )
   
-  # Summary metrics by condition
+  # Summary metrics by condition with safe calculations
   condition_metrics <- well_metrics %>%
     group_by(sample_type, concentration) %>%
-    summarise(
+    safe_summarise(
       n_replicates = n(),
       
       # Initial OD stats
@@ -1127,8 +1169,8 @@ calculate_growth_metrics_summary <- function(corrected_results) {
       .groups = "drop"
     ) %>%
     mutate(
-      cv_final_od = sd_final_od / mean_final_od * 100,
-      cv_total_growth = sd_total_growth / abs(mean_total_growth) * 100
+      cv_final_od = ifelse(mean_final_od != 0, sd_final_od / mean_final_od * 100, NA_real_),
+      cv_total_growth = ifelse(mean_total_growth != 0, sd_total_growth / abs(mean_total_growth) * 100, NA_real_)
     )
   
   return(list(
@@ -1137,48 +1179,62 @@ calculate_growth_metrics_summary <- function(corrected_results) {
   ))
 }
 
-#' Create time-based summaries
+#' Create time-based summaries with safe statistics
 create_time_summaries <- function(corrected_results) {
   
-  # Growth at specific timepoints
-  key_timepoints <- corrected_results$replicate_stats %>%
+  # Growth at specific timepoints with safe quantiles
+  time_values <- corrected_results$replicate_stats %>%
     filter(sample_type == "sample") %>%
-    pull(time_hrs) %>%
-    quantile(c(0, 0.25, 0.5, 0.75, 1), na.rm = TRUE) %>%
-    round(1)
+    pull(time_hrs)
   
-  timepoint_summary <- corrected_results$replicate_stats %>%
-    filter(time_hrs %in% key_timepoints) %>%
-    select(sample_type, concentration, time_hrs, mean_od, se_od) %>%
-    pivot_wider(
-      names_from = time_hrs,
-      values_from = c(mean_od, se_od),
-      names_sep = "_hrs_"
-    )
+  if (length(time_values) > 0) {
+    key_timepoints <- suppressWarnings(
+      quantile(time_values, c(0, 0.25, 0.5, 0.75, 1), na.rm = TRUE)
+    ) %>% round(1)
+  } else {
+    key_timepoints <- numeric(0)
+  }
   
-  # Growth phases (early, mid, late)
-  time_range <- range(corrected_results$replicate_stats$time_hrs)
-  
-  phase_summary <- corrected_results$replicate_stats %>%
-    mutate(
-      growth_phase = case_when(
-        time_hrs <= time_range[1] + (time_range[2] - time_range[1]) * 0.33 ~ "early",
-        time_hrs <= time_range[1] + (time_range[2] - time_range[1]) * 0.67 ~ "mid",
-        TRUE ~ "late"
+  timepoint_summary <- if(length(key_timepoints) > 0) {
+    corrected_results$replicate_stats %>%
+      filter(time_hrs %in% key_timepoints) %>%
+      select(sample_type, concentration, time_hrs, mean_od, se_od) %>%
+      pivot_wider(
+        names_from = time_hrs,
+        values_from = c(mean_od, se_od),
+        names_sep = "_hrs_"
       )
-    ) %>%
-    group_by(sample_type, concentration, growth_phase) %>%
-    summarise(
-      mean_od_phase = mean(mean_od, na.rm = TRUE),
-      max_od_phase = max(mean_od, na.rm = TRUE),
-      n_timepoints = n(),
-      .groups = "drop"
-    ) %>%
-    pivot_wider(
-      names_from = growth_phase,
-      values_from = c(mean_od_phase, max_od_phase),
-      names_sep = "_"
-    )
+  } else {
+    tibble()
+  }
+  
+  # Growth phases (early, mid, late) with safe range
+  time_range <- safe_range(corrected_results$replicate_stats$time_hrs)
+  
+  phase_summary <- if (!any(is.na(time_range))) {
+    corrected_results$replicate_stats %>%
+      mutate(
+        growth_phase = case_when(
+          time_hrs <= time_range[1] + (time_range[2] - time_range[1]) * 0.33 ~ "early",
+          time_hrs <= time_range[1] + (time_range[2] - time_range[1]) * 0.67 ~ "mid",
+          TRUE ~ "late"
+        )
+      ) %>%
+      group_by(sample_type, concentration, growth_phase) %>%
+      safe_summarise(
+        mean_od_phase = mean(mean_od, na.rm = TRUE),
+        max_od_phase = safe_max(mean_od, na.rm = TRUE),
+        n_timepoints = n(),
+        .groups = "drop"
+      ) %>%
+      pivot_wider(
+        names_from = growth_phase,
+        values_from = c(mean_od_phase, max_od_phase),
+        names_sep = "_"
+      )
+  } else {
+    tibble()
+  }
   
   return(list(
     key_timepoints = timepoint_summary,
@@ -3951,46 +4007,71 @@ get_wavelength <- function(results, wavelength) {
   }
 }
 
-# ===== MAIN ANALYSIS FUNCTIONS =====
-
-#' Complete analysis pipeline
-analyze_growth_curves <- function(file_path, layout_type = "default") {
+# ===== HELPER FUNCTIONS ====
+#' Convert time to decimal hours - handles both HH:MM:SS and decimal formats
+convert_time_to_hours <- function(time_values) {
   
-  cat("\n")
-  cat("🧬 === SYNERGY HTX GROWTH CURVE ANALYSIS ===\n")
-  cat("📁 File:", basename(file_path), "\n\n")
-  
-  # Process raw data
-  cat("1️⃣  Processing raw data...\n")
-  processed_data <- process_synergy_file(file_path, layout_type = layout_type)
-  
-  # Apply corrections
-  cat("\n2️⃣  Applying corrections...\n")
-  corrected_results <- process_with_corrections(processed_data)
-  
-  # Create visualizations
-  cat("\n3️⃣  Creating visualizations...\n")
-  plots <- list(
-    growth_curves = plot_growth_curves(corrected_results),
-    initial_plate = plot_plate_heatmap(corrected_results, "first", "corrected"),
-    final_plate = plot_plate_heatmap(corrected_results, "last", "corrected"),
-    plate_composite = plot_plate_heatmap_composite(corrected_results),
-    qc_plots = create_qc_plots(corrected_results, processed_data)
-  )
-  
-  cat("✅ Visualizations created successfully\n")
-  
-  cat("\n🎉 === ANALYSIS COMPLETE ===\n")
-  cat("📊 Results available in returned object\n")
-  cat("📈 Use print(results$plots$growth_curves) to view main plot\n")
-  cat("🔍 Use print(results$plots$final_plate) to view final plate layout\n\n")
-  
-  return(list(
-    processed_data = processed_data,
-    corrected_results = corrected_results,
-    plots = plots
-  ))
+  sapply(time_values, function(time_val) {
+    if (is.na(time_val) || time_val == "") {
+      return(NA_real_)
+    }
+    
+    time_str <- as.character(time_val)
+    
+    # Check if it's already a decimal number
+    if (str_detect(time_str, "^[0-9]*\\.?[0-9]+$")) {
+      return(as.numeric(time_str))
+    }
+    
+    # Check if it's HH:MM:SS format
+    if (str_detect(time_str, "^\\d{1,2}:\\d{2}(:\\d{2})?$")) {
+      time_parts <- str_split(time_str, ":")[[1]]
+      
+      hours <- as.numeric(time_parts[1])
+      minutes <- as.numeric(time_parts[2])
+      seconds <- if(length(time_parts) == 3) as.numeric(time_parts[3]) else 0
+      
+      return(hours + minutes/60 + seconds/3600)
+    }
+    
+    # Try to parse as numeric if other formats fail
+    numeric_val <- suppressWarnings(as.numeric(time_str))
+    return(numeric_val)
+  })
 }
+
+# ===== SAFE STATISTICAL FUNCTIONS =====
+
+#' Safe range calculation that handles empty vectors
+safe_range <- function(x, na.rm = TRUE) {
+  if (length(x) == 0 || all(is.na(x))) {
+    return(c(NA_real_, NA_real_))
+  }
+  suppressWarnings(range(x, na.rm = na.rm))
+}
+
+#' Safe min calculation
+safe_min <- function(x, na.rm = TRUE) {
+  if (length(x) == 0 || all(is.na(x))) {
+    return(NA_real_)
+  }
+  suppressWarnings(min(x, na.rm = na.rm))
+}
+
+#' Safe max calculation
+safe_max <- function(x, na.rm = TRUE) {
+  if (length(x) == 0 || all(is.na(x))) {
+    return(NA_real_)
+  }
+  suppressWarnings(max(x, na.rm = na.rm))
+}
+
+#' Safe summary statistics for groups
+safe_summarise <- function(.data, ...) {
+  suppressWarnings(.data %>% summarise(...))
+}
+
+# ===== MAIN ANALYSIS FUNCTIONS =====
 
 #' Enhanced main analysis function for multiple wavelengths
 analyze_growth_curves_multi <- function(file_path, layout_type = "default") {
@@ -4043,9 +4124,6 @@ analyze_growth_curves_multi <- function(file_path, layout_type = "default") {
   
   return(results_by_wavelength)
 }
-
-
-
 
 #' Adapt single wavelength result for compatibility with original functions
 adapt_single_wavelength_result <- function(single_result) {
@@ -4183,48 +4261,52 @@ analyze_growth_curves <- function(file_path, layout_type = "default",
                                   export_summaries = FALSE, 
                                   run_diagnostics = TRUE) {
   
-  cat("\n")
-  cat("• === GROWTH CURVE ANALYSIS ===\n")
-  cat("• File:", basename(file_path), "\n\n")
-  
-  # Use multi-wavelength analysis (handles both single and multi)
-  multi_results <- analyze_growth_curves_multi(file_path, layout_type)
-  
-  # Check how many wavelengths we got
-  n_wavelengths <- length(multi_results)
-  
-  if (n_wavelengths == 1) {
-    # Single wavelength - adapt for compatibility with accessor functions
-    wavelength_key <- names(multi_results)[1]
-    single_result <- multi_results[[wavelength_key]]
+  # Suppress warnings during analysis
+  suppressWarnings({
     
-    cat("• Single wavelength detected - adapting for standard accessor functions\n")
-    adapted_result <- adapt_single_wavelength_for_accessors(single_result)
+    cat("\n")
+    cat("• === GROWTH CURVE ANALYSIS ===\n")
+    cat("• File:", basename(file_path), "\n\n")
     
-    # Run diagnostics and summaries if requested
-    if (run_diagnostics) {
-      cat("• Running diagnostics...\n")
-      adapted_result$diagnostics <- diagnose_data_issues(adapted_result$corrected_results)
-    }
+    # Use multi-wavelength analysis (handles both single and multi)
+    multi_results <- analyze_growth_curves_multi(file_path, layout_type)
     
-    if (export_summaries) {
-      cat("• Generating summaries...\n")
-      adapted_result$summaries <- summarize_replicate_results(adapted_result$corrected_results)
-      display_summaries(adapted_result$summaries)
+    # Check how many wavelengths we got
+    n_wavelengths <- length(multi_results)
+    
+    if (n_wavelengths == 1) {
+      # Single wavelength - adapt for compatibility with accessor functions
+      wavelength_key <- names(multi_results)[1]
+      single_result <- multi_results[[wavelength_key]]
       
-      export_filename <- paste0(tools::file_path_sans_ext(basename(file_path)), "_summaries.xlsx")
-      export_summaries_to_excel(adapted_result$summaries, export_filename)
+      cat("• Single wavelength detected - adapting for standard accessor functions\n")
+      adapted_result <- adapt_single_wavelength_for_accessors(single_result)
+      
+      # Run diagnostics and summaries if requested
+      if (run_diagnostics) {
+        cat("• Running diagnostics...\n")
+        adapted_result$diagnostics <- diagnose_data_issues(adapted_result$corrected_results)
+      }
+      
+      if (export_summaries) {
+        cat("• Generating summaries...\n")
+        adapted_result$summaries <- summarize_replicate_results(adapted_result$corrected_results)
+        display_summaries(adapted_result$summaries)
+        
+        export_filename <- paste0(tools::file_path_sans_ext(basename(file_path)), "_summaries.xlsx")
+        export_summaries_to_excel(adapted_result$summaries, export_filename)
+      }
+      
+      return(adapted_result)
+      
+    } else {
+      # Multi-wavelength - return as-is
+      cat("• Multi-wavelength data detected\n")
+      cat("• Access individual wavelengths: results$wavelength_600, results$wavelength_420, etc.\n")
+      
+      return(multi_results)
     }
-    
-    return(adapted_result)
-    
-  } else {
-    # Multi-wavelength - return as-is
-    cat("• Multi-wavelength data detected\n")
-    cat("• Access individual wavelengths: results$wavelength_600, results$wavelength_420, etc.\n")
-    
-    return(multi_results)
-  }
+  })
 }
 
 #' Wrapper function for warnings control
@@ -4233,236 +4315,500 @@ run_analysis <- function(file_path, export_summaries = TRUE) {
   analyze_growth_curves(file_path, export_summaries = export_summaries, run_diagnostics = TRUE)
 }
 
-# ==== CODE CLEANUP ====
-library(codetools)
 
-# Function to extract all function definitions from R files
-extract_function_definitions <- function(directory = ".") {
-  r_files <- list.files(directory, pattern = "\\.R$", recursive = TRUE, full.names = TRUE)
+# ==== ADDED CSV FUNCTIONALITY ====
+read_synergy_htx_csv_file <- function(file_path, sheet_name = NULL) {
   
-  all_functions <- tibble()
+  cat("📖 Reading Synergy HTX CSV file:", basename(file_path), "\n")
   
-  for (file in r_files) {
-    content <- readLines(file, warn = FALSE)
-    
-    # Pattern to match function definitions
-    # Matches: function_name <- function(...) or function_name = function(...)
-    func_pattern <- "^\\s*([a-zA-Z_][a-zA-Z0-9_.]*)\\s*(<-|=)\\s*function\\s*\\("
-    
-    func_matches <- str_match(content, func_pattern)
-    func_lines <- which(!is.na(func_matches[,1]))
-    
-    if (length(func_lines) > 0) {
-      file_functions <- tibble(
-        function_name = func_matches[func_lines, 2],
-        file = file,
-        line = func_lines
-      )
-      all_functions <- bind_rows(all_functions, file_functions)
-    }
-  }
+  # Read entire CSV file
+  all_data <- suppressMessages(suppressWarnings(
+    read_csv(file_path, col_names = FALSE, col_types = cols(.default = "c"))
+  ))
   
-  return(all_functions)
+  # Extract metadata (rows 1-25)
+  metadata <- extract_metadata(all_data[1:25, 1:10])
+  
+  # Find data boundaries
+  data_boundaries <- find_data_boundaries(all_data)
+  
+  # Read kinetic data
+  kinetic_data <- read_kinetic_data_csv(file_path, data_boundaries)
+  
+  # Process and clean kinetic data
+  kinetic_long <- process_kinetic_data_csv(kinetic_data, metadata)
+  
+  cat("✅ Successfully read", nrow(kinetic_long), "data points from", 
+      length(unique(kinetic_long$well_id)), "wells\n")
+  
+  return(list(
+    metadata = metadata,
+    kinetic_data = kinetic_long,
+    experiment_start = create_experiment_datetime(metadata)
+  ))
 }
 
-# Function to recursively find all called functions
-find_called_functions <- function(func_name, env = .GlobalEnv, visited = character()) {
-  if (func_name %in% visited) return(character())
+#' Read Synergy HTX CSV file and extract multiple wavelengths
+read_synergy_htx_csv_file_multi <- function(file_path, sheet_name = NULL) {
   
-  visited <- c(visited, func_name)
-  called_functions <- character()
+  cat("• Reading Synergy HTX CSV file:", basename(file_path), "\n")
   
-  tryCatch({
-    if (exists(func_name, envir = env)) {
-      func_obj <- get(func_name, envir = env)
-      if (is.function(func_obj)) {
-        # Use codetools to find globals
-        globals <- findGlobals(func_obj, merge = FALSE)
-        direct_calls <- globals$functions
-        
-        called_functions <- c(called_functions, direct_calls)
-        
-        # Recursively find functions called by the direct calls
-        for (called_func in direct_calls) {
-          if (!called_func %in% visited) {
-            indirect_calls <- find_called_functions(called_func, env, visited)
-            called_functions <- c(called_functions, indirect_calls)
-            visited <- c(visited, indirect_calls)
-          }
-        }
-      }
-    }
-  }, error = function(e) {
-    warning(paste("Could not analyze function:", func_name, "-", e$message))
+  # Read entire CSV file
+  all_data <- suppressMessages(suppressWarnings(
+    read_csv(file_path, col_names = FALSE, col_types = cols(.default = "c"))
+  ))
+  
+  # Extract metadata (rows 1-25)
+  metadata <- extract_metadata(all_data[1:25, 1:10])
+  
+  # Find all wavelength sections
+  wavelength_sections <- find_wavelength_sections_csv(all_data)
+  
+  # Read and process each wavelength
+  wavelength_data <- list()
+  experiment_start <- create_experiment_datetime(metadata)
+  
+  for (section_name in names(wavelength_sections)) {
+    wavelength_info <- wavelength_sections[[section_name]]
+    wavelength <- wavelength_info$wavelength
+    
+    # Read kinetic data for this wavelength
+    kinetic_data <- read_wavelength_kinetic_data_csv(file_path, wavelength_info)
+    
+    # Process and clean kinetic data
+    kinetic_long <- process_wavelength_kinetic_data_csv(kinetic_data, metadata, wavelength)
+    
+    wavelength_data[[section_name]] <- kinetic_long
+    
+    cat("  ✓ Processed", nrow(kinetic_long), "data points for", wavelength, "nm\n")
+  }
+  
+  cat("• Successfully read", length(wavelength_data), "wavelength(s):", 
+      paste(sapply(wavelength_sections, function(x) paste0(x$wavelength, "nm")), collapse = ", "), "\n")
+  
+  return(list(
+    metadata = metadata,
+    wavelength_data = wavelength_data,
+    wavelength_sections = wavelength_sections,
+    experiment_start = experiment_start
+  ))
+}
+
+#' Read kinetic data section from CSV file
+read_kinetic_data_csv <- function(file_path, boundaries) {
+  suppressMessages(suppressWarnings(
+    read_csv(
+      file_path,
+      skip = boundaries$start - 1,
+      n_max = boundaries$end - boundaries$start + 1,
+      col_names = FALSE,
+      col_types = cols(.default = "c")
+    )
+  ))
+}
+
+#' Read kinetic data for a specific wavelength from CSV
+read_wavelength_kinetic_data_csv <- function(file_path, wavelength_info) {
+  
+  cat("• Reading", wavelength_info$wavelength, "nm data (rows", 
+      wavelength_info$data_start, "to", wavelength_info$data_end, ")\n")
+  
+  suppressMessages(suppressWarnings(
+    read_csv(
+      file_path,
+      skip = wavelength_info$data_start - 1,
+      n_max = wavelength_info$data_end - wavelength_info$data_start + 1,
+      col_names = FALSE,
+      col_types = cols(.default = "c")
+    )
+  ))
+}
+
+#' Process raw kinetic data from CSV into long format
+process_kinetic_data_csv <- function(kinetic_data, metadata) {
+  
+  # Set column names
+  n_cols <- ncol(kinetic_data)
+  col_names <- c("time_hrs", "time_formatted", "temperature", 
+                 paste0(rep(LETTERS[1:8], each = 12), 
+                        sprintf("%02d", rep(1:12, 8))))
+  col_names <- col_names[1:n_cols]
+  names(kinetic_data) <- col_names
+  
+  # Create experiment start datetime
+  experiment_start <- create_experiment_datetime(metadata)
+  
+  # Process to long format with CSV-specific time handling
+  suppressWarnings({
+    kinetic_long <- kinetic_data %>%
+      mutate(
+        # Handle time - could be HH:MM:SS format or decimal hours
+        time_hrs_clean = convert_time_to_hours(time_hrs),
+        temperature_clean = as.numeric(temperature)
+      ) %>%
+      filter(!is.na(time_hrs_clean)) %>%
+      mutate(datetime = experiment_start + seconds(time_hrs_clean * 3600)) %>%
+      select(time_hrs_clean, temperature_clean, datetime, A01:H12) %>%
+      pivot_longer(
+        cols = A01:H12,
+        names_to = "well_id",
+        values_to = "od600_raw"
+      ) %>%
+      mutate(od600 = as.numeric(od600_raw)) %>%
+      filter(!is.na(od600)) %>%
+      rename(
+        time_hrs = time_hrs_clean,
+        temperature = temperature_clean
+      ) %>%
+      arrange(datetime, well_id) %>%
+      group_by(well_id) %>%
+      mutate(
+        time_point = row_number(),
+        time_elapsed = time_hrs - min(time_hrs, na.rm = TRUE)
+      ) %>%
+      ungroup() %>%
+      select(time_hrs, datetime, well_id, od600, time_point, temperature, time_elapsed)
   })
   
-  return(unique(called_functions))
+  return(kinetic_long)
 }
 
-find_function_calls_in_text <- function(directory = ".") {
-  r_files <- list.files(directory, pattern = "\\.R$", recursive = TRUE, full.names = TRUE)
+#' Process wavelength kinetic data from CSV with adaptive column handling
+process_wavelength_kinetic_data_csv <- function(kinetic_data, metadata, wavelength) {
   
-  all_calls <- character()
+  n_cols <- ncol(kinetic_data)
+  cat("  - Processing", n_cols, "columns for", wavelength, "nm\n")
   
-  for (file in r_files) {
-    content <- readLines(file, warn = FALSE)
-    
-    # Remove comments and strings to avoid false positives
-    content_clean <- content %>%
-      str_remove_all("#.*$") %>%  # Remove comments
-      str_remove_all('"[^"]*"') %>%  # Remove double-quoted strings
-      str_remove_all("'[^']*'")     # Remove single-quoted strings
-    
-    # Pattern to match function calls: word followed by (
-    call_pattern <- "([a-zA-Z_][a-zA-Z0-9_.]*)\\s*\\("
-    
-    calls <- str_extract_all(content_clean, call_pattern) %>%
-      unlist() %>%
-      str_remove("\\s*\\($")
-    
-    all_calls <- c(all_calls, calls)
+  # Check if first row is header
+  first_row <- kinetic_data[1, ] %>% unlist() %>% na.omit() %>% as.character()
+  has_header <- any(str_detect(first_row, "Time|T°"))
+  
+  if (has_header) {
+    kinetic_data <- kinetic_data[-1, ]
+    cat("  - Removed header row\n")
+    cat("  - Header was:", paste(head(first_row, 6), collapse = ", "), "\n")
   }
   
-  return(unique(all_calls))
+  # ADAPTIVE COLUMN DETECTION (same logic as Excel version)
+  if (n_cols == 98) {
+    cat("  - 98 columns detected - checking if Col1=Time, Col2=Temp\n")
+    
+    col1_sample <- convert_time_to_hours(kinetic_data[[1]][1:3])
+    col2_sample <- suppressWarnings(as.numeric(kinetic_data[[2]][1:3]))
+    
+    # Col1 should be time (0-24 hours), Col2 should be temp (30-50°C)
+    col1_is_time <- all(!is.na(col1_sample)) && all(col1_sample >= 0 & col1_sample <= 24)
+    col2_is_temp <- all(!is.na(col2_sample)) && all(col2_sample >= 30 & col2_sample <= 50)
+    
+    if (col1_is_time && col2_is_temp) {
+      cat("  - Standard format: Col1=Time, Col2=Temp - using as-is\n")
+      use_data <- kinetic_data
+      final_n_cols <- n_cols
+    } else {
+      cat("  - WARNING: 98 columns but Col1/Col2 don't look like Time/Temp\n")
+      cat("  - Col1 sample:", paste(col1_sample, collapse = ", "), "\n")
+      cat("  - Col2 sample:", paste(col2_sample, collapse = ", "), "\n")
+      use_data <- kinetic_data
+      final_n_cols <- n_cols
+    }
+    
+  } else if (n_cols == 99) {
+    cat("  - 99 columns detected - checking if Col2=Time, Col3=Temp (Col1=extra)\n")
+    
+    col1_sample <- kinetic_data[[1]][1:3]
+    col2_sample <- convert_time_to_hours(kinetic_data[[2]][1:3])
+    col3_sample <- suppressWarnings(as.numeric(kinetic_data[[3]][1:3]))
+    
+    cat("  - Col1 (potential extra):", paste(col1_sample, collapse = ", "), "\n")
+    cat("  - Col2 (potential time):", paste(col2_sample, collapse = ", "), "\n")
+    cat("  - Col3 (potential temp):", paste(col3_sample, collapse = ", "), "\n")
+    
+    # Col2 should be time (0-24 hours), Col3 should be temp (30-50°C)
+    col2_is_time <- all(!is.na(col2_sample)) && all(col2_sample >= 0 & col2_sample <= 24)
+    col3_is_temp <- all(!is.na(col3_sample)) && all(col3_sample >= 30 & col3_sample <= 50)
+    
+    if (col2_is_time && col3_is_temp) {
+      cat("  - Extra column format detected: dropping Col1, using Col2=Time, Col3=Temp\n")
+      use_data <- kinetic_data[, -1]  # Drop first column
+      final_n_cols <- 98
+    } else {
+      cat("  - WARNING: 99 columns but Col2/Col3 don't look like Time/Temp\n")
+      cat("  - Assuming standard format and hoping for the best\n")
+      use_data <- kinetic_data
+      final_n_cols <- n_cols
+    }
+    
+  } else {
+    cat("  - Unexpected column count:", n_cols, "- using standard processing\n")
+    use_data <- kinetic_data
+    final_n_cols <- n_cols
+  }
+  
+  # NOW PROCEED WITH STANDARD COLUMN ASSIGNMENT
+  if (final_n_cols >= 98) {
+    col_names <- c("time_hrs", "temperature", 
+                   paste0(rep(LETTERS[1:8], each = 12), 1:12))
+    col_names <- col_names[1:final_n_cols]
+    well_cols <- col_names[3:98]  # A1-H12
+    
+  } else if (final_n_cols >= 14) {
+    col_names <- c("time_hrs", "temperature", paste0("Col_", 3:final_n_cols))
+    well_cols <- col_names[3:length(col_names)]
+    
+  } else {
+    stop("Unexpected number of columns after processing: ", final_n_cols)
+  }
+  
+  names(use_data) <- col_names
+  
+  cat("  - Final format: Time=", paste(use_data$time_hrs[1:2], collapse = ", "), "\n")
+  cat("  - Final format: Temp=", paste(use_data$temperature[1:2], collapse = ", "), "\n")
+  cat("  - Well columns identified:", length(well_cols), "\n")
+  
+  # Create experiment start datetime
+  experiment_start <- create_experiment_datetime(metadata)
+  
+  # Process to long format with CSV time handling
+  suppressWarnings({
+    kinetic_clean <- use_data %>%
+      mutate(
+        time_hrs_clean = convert_time_to_hours(time_hrs),  # Use CSV time converter
+        temperature_clean = as.numeric(temperature)
+      ) %>%
+      filter(!is.na(time_hrs_clean))
+    
+    # Verify final ranges make sense
+    time_range <- range(kinetic_clean$time_hrs_clean, na.rm = TRUE)
+    temp_range <- range(kinetic_clean$temperature_clean, na.rm = TRUE)
+    cat("  - Final time range:", round(time_range[1], 3), "to", round(time_range[2], 3), "hours\n")
+    cat("  - Final temp range:", round(temp_range[1], 1), "to", round(temp_range[2], 1), "°C\n")
+    
+    kinetic_long <- kinetic_clean %>%
+      mutate(datetime = experiment_start + seconds(time_hrs_clean * 3600)) %>%
+      select(time_hrs_clean, temperature_clean, datetime, all_of(well_cols)) %>%
+      pivot_longer(
+        cols = all_of(well_cols),
+        names_to = "well_id_raw",
+        values_to = paste0("od", wavelength, "_raw")
+      ) %>%
+      mutate(
+        !!paste0("od", wavelength, "_raw") := as.numeric(.data[[paste0("od", wavelength, "_raw")]]),
+        !!paste0("od", wavelength) := .data[[paste0("od", wavelength, "_raw")]],
+        well_id = case_when(
+          str_detect(well_id_raw, "^[A-H]\\d{1}$") ~ str_replace(well_id_raw, "^([A-H])(\\d)$", "\\10\\2"),
+          str_detect(well_id_raw, "^[A-H]\\d{2}$") ~ well_id_raw,
+          TRUE ~ well_id_raw
+        )
+      ) %>%
+      filter(!is.na(.data[[paste0("od", wavelength, "_raw")]]),
+             is.finite(.data[[paste0("od", wavelength, "_raw")]])) %>%
+      rename(
+        time_hrs = time_hrs_clean,
+        temperature = temperature_clean
+      ) %>%
+      select(-well_id_raw) %>%
+      arrange(datetime, well_id) %>%
+      group_by(well_id) %>%
+      mutate(
+        time_point = row_number(),
+        time_elapsed = time_hrs - min(time_hrs, na.rm = TRUE),
+        wavelength = wavelength
+      ) %>%
+      ungroup() %>%
+      select(time_hrs, datetime, well_id, starts_with(paste0("od", wavelength)), 
+             time_point, temperature, time_elapsed, wavelength)
+  })
+  
+  cat("  - Processed", nrow(kinetic_long), "data points\n")
+  cat("  - Wells found:", length(unique(kinetic_long$well_id)), "\n")
+  
+  return(kinetic_long)
 }
 
-identify_unused_functions <- function(directory = ".", 
-                                      wrapper_function_name = "analyze_growth_curves") {
+#' Find all wavelength sections in CSV data
+find_wavelength_sections_csv <- function(all_data) {
   
-  cat("🔍 Discovering all function definitions...\n")
-  all_defined_functions <- extract_function_definitions(directory)
+  wavelength_sections <- list()
   
-  cat("📊 Found", nrow(all_defined_functions), "function definitions\n")
-  
-  # Method 1: Text-based analysis (more reliable for complex codebases)
-  cat("🔍 Finding all function calls in codebase...\n")
-  all_called_functions <- find_function_calls_in_text(directory)
-  
-  # Method 2: Add functions called from your wrapper (if loaded in environment)
-  if (exists(wrapper_function_name)) {
-    cat("🔍 Analyzing wrapper function calls...\n")
-    wrapper_calls <- find_called_functions(wrapper_function_name)
-    all_called_functions <- c(all_called_functions, wrapper_calls)
+  # Look for wavelength markers
+  for (i in 1:nrow(all_data)) {
+    first_cell <- all_data[[i, 1]]
+    if (!is.na(first_cell)) {
+      # Check if it's a wavelength marker
+      if (str_detect(as.character(first_cell), "^(420|600|\\d{3})$")) {
+        wavelength <- as.character(first_cell)
+        
+        cat("• Found wavelength section:", wavelength, "nm at row", i, "\n")
+        
+        # Look for the header row (should contain "Time", "T°", A1, A2, etc.)
+        header_row <- NA
+        data_start_row <- NA
+        
+        for (j in (i + 1):(i + 5)) {  # Check next few rows
+          if (j <= nrow(all_data)) {
+            # Check if this looks like a header row
+            row_content <- all_data[j, ] %>% unlist() %>% na.omit() %>% as.character()
+            
+            # Look for Time, temperature, and well identifiers
+            has_time <- any(str_detect(row_content, "Time"))
+            has_temp <- any(str_detect(row_content, "T°|temp"))
+            has_wells <- any(str_detect(row_content, "^[A-H][0-9]+$"))  # A1, B1, etc.
+            
+            if (has_time && has_temp && has_wells) {
+              header_row <- j
+              data_start_row <- j + 1
+              cat("  - Found header at row", header_row, "\n")
+              break
+            }
+          }
+        }
+        
+        if (is.na(data_start_row)) {
+          cat("• Warning: Could not find header/data start for wavelength", wavelength, "\n")
+          # Try to find data start without header
+          for (j in (i + 1):(i + 10)) {
+            if (j <= nrow(all_data)) {
+              first_data_cell <- all_data[[j, 1]]
+              if (!is.na(first_data_cell)) {
+                # Check if it looks like time data (number between 0 and 50)
+                numeric_val <- suppressWarnings(as.numeric(first_data_cell))
+                if (!is.na(numeric_val) && numeric_val >= 0 && numeric_val < 50) {
+                  data_start_row <- j
+                  cat("  - Found data start (no header) at row", data_start_row, "\n")
+                  break
+                }
+                # Also check for HH:MM:SS format
+                if (str_detect(as.character(first_data_cell), "^\\d{1,2}:\\d{2}(:\\d{2})?$")) {
+                  data_start_row <- j
+                  cat("  - Found data start (time format) at row", data_start_row, "\n")
+                  break
+                }
+              }
+            }
+          }
+        }
+        
+        if (is.na(data_start_row)) {
+          cat("• Skipping wavelength", wavelength, "- could not find data\n")
+          next
+        }
+        
+        # Find end of data for this wavelength
+        data_end_row <- nrow(all_data)
+        for (k in (data_start_row + 10):nrow(all_data)) {
+          if (k <= nrow(all_data)) {
+            # Check if we hit another wavelength marker
+            next_cell <- all_data[[k, 1]]
+            if (!is.na(next_cell) && str_detect(as.character(next_cell), "^(420|600|\\d{3})$")) {
+              data_end_row <- k - 1
+              break
+            }
+            
+            # Check if we hit empty rows (multiple empty cells in key columns)
+            key_columns <- all_data[k, 1:5] %>% unlist()
+            non_empty_count <- sum(!is.na(key_columns) & key_columns != "" & key_columns != "NA")
+            
+            if (non_empty_count == 0) {
+              data_end_row <- k - 1
+              break
+            }
+          }
+        }
+        
+        wavelength_sections[[paste0("wavelength_", wavelength)]] <- list(
+          wavelength = wavelength,
+          marker_row = i,
+          header_row = header_row,
+          data_start = data_start_row,
+          data_end = data_end_row
+        )
+        
+        cat("  - Data rows:", data_start_row, "to", data_end_row, "\n")
+      }
+    }
   }
   
-  # Remove base R and common package functions to reduce noise
-  base_functions <- c(ls("package:base"), ls("package:stats"), ls("package:utils"))
-  common_functions <- c("library", "require", "source", "print", "cat", "message", 
-                        "warning", "stop", "paste", "paste0", "length", "nrow", 
-                        "ncol", "dim", "names", "colnames", "rownames", "head", 
-                        "tail", "summary", "str", "class", "typeof", "is.null",
-                        "is.na", "any", "all", "which", "match", "grep", "grepl",
-                        "gsub", "substr", "nchar", "toupper", "tolower")
-  
-  all_called_functions <- setdiff(all_called_functions, c(base_functions, common_functions))
-  
-  # Find unused functions
-  unused_functions <- all_defined_functions %>%
-    filter(!function_name %in% all_called_functions) %>%
-    arrange(file, line)
-  
-  # Find potentially missing functions (called but not defined)
-  missing_functions <- setdiff(all_called_functions, all_defined_functions$function_name)
-  
-  # Create summary
-  results <- list(
-    all_defined = all_defined_functions,
-    all_called = all_called_functions,
-    unused = unused_functions,
-    missing = missing_functions,
-    summary = list(
-      total_defined = nrow(all_defined_functions),
-      total_called = length(unique(all_called_functions)),
-      unused_count = nrow(unused_functions),
-      missing_count = length(missing_functions)
+  if (length(wavelength_sections) == 0) {
+    # Fallback: assume 600nm data starts around row 40
+    cat("• No wavelength markers found, assuming 600nm data from row 40\n")
+    data_boundaries <- find_data_boundaries(all_data)
+    wavelength_sections[["wavelength_600"]] <- list(
+      wavelength = "600",
+      marker_row = NA,
+      header_row = NA,
+      data_start = data_boundaries$start,
+      data_end = data_boundaries$end
     )
-  )
-  
-  return(results)
-}
-
-# Function to generate a report
-generate_cleanup_report <- function(analysis_results, 
-                                    output_file = "function_cleanup_report.txt") {
-  
-  sink(output_file)
-  
-  cat("=== FUNCTION CLEANUP REPORT ===\n\n")
-  
-  cat("📊 SUMMARY:\n")
-  cat("Total functions defined:", analysis_results$summary$total_defined, "\n")
-  cat("Total functions called:", analysis_results$summary$total_called, "\n")
-  cat("Unused functions:", analysis_results$summary$unused_count, "\n")
-  cat("Missing functions:", analysis_results$summary$missing_count, "\n\n")
-  
-  if (nrow(analysis_results$unused) > 0) {
-    cat("❌ UNUSED FUNCTIONS (safe to remove):\n")
-    cat("=====================================\n")
-    
-    for (i in 1:nrow(analysis_results$unused)) {
-      row <- analysis_results$unused[i, ]
-      cat(sprintf("• %s (in %s, line %d)\n", 
-                  row$function_name, basename(row$file), row$line))
-    }
-    cat("\n")
   }
   
-  if (length(analysis_results$missing) > 0) {
-    cat("⚠️  CALLED BUT NOT DEFINED (may be from packages):\n")
-    cat("================================================\n")
-    for (func in analysis_results$missing) {
-      cat("•", func, "\n")
-    }
-    cat("\n")
-  }
-  
-  sink()
-  
-  cat("📝 Report saved to:", output_file, "\n")
+  return(wavelength_sections)
 }
 
-source_all_files <- function(directory = ".") {
-  r_files <- list.files(directory, pattern = "\\.R$", recursive = TRUE, full.names = TRUE)
-  for (file in r_files) {
-    tryCatch(source(file), error = function(e) {
-      warning(paste("Could not source", file, ":", e$message))
-    })
-  }
-}
 
-# # Run the analysis
-# source_all_files()  # Load all your functions
-# results <- identify_unused_functions()
-# 
-# # Generate report
-# generate_cleanup_report(results)
-# 
-# # View unused functions interactively
-# View(results$unused)
-# 
-# unique(results$unused$file)
-# results$unused %>% 
-#   filter(file== "./BioTek_Synergy_HTX_Processing_v0.4.2_DEV.R" ) %>% 
-#   select(function_name) %>% 
-#   unique()
-# 
-# # Get a quick summary
-# cat("Found", nrow(results$unused), "unused functions out of", 
-#     results$summary$total_defined, "total functions\n")
+
+
 
 # ===== Actual Data Processing ===== 
 
 
+# Set working directory (adjust as needed)
+setup_workspace("/home/william-ackerman/Desktop/Microbial_Growth_Curves_Analysis")
+
+# Test single wavelength
+results_single <- analyze_growth_curves("25-06-17_AgNP_cubes_DP_datacorrected.xlsx")
+
+# Try basic accessors
+quick_check(results_single)
+show_growth_curves(results_single)
+show_plate_composite(results_single)
+show_qc_plots(results_single)
+plot_concentrations_panel(results_single)
+
+# Test multi-wavelength
+
+check <- analyze_growth_curves("25-06-17_AgNP_cubes_DP_raw_plate_layout.csv")
+results_multi <- analyze_growth_curves("25-06-17_AgNP_cubes_DP_raw_plate_layout.xlsx")
+results_multi$wavelength_600$plots$concentrations_panel
+get_colleague_format(results_multi, wavelength = "600")
+
+# Check structure
+names(results_multi)
+quick_check(results_multi)
+
+#Show specific wavelength
+show_growth_curves(results_multi, wavelength = "600")
+plot_concentrations_panel(results_multi, , wavelength = "600")
+plot_concentrations_panel(results_multi, , wavelength = "420")
+
+# Show ALL wavelengths
+show_growth_curves(results_multi, wavelength = "all")
+show_plate_endpoint(results_multi, wavelength = "all")
+show_plate_composite(results_multi, wavelength = "all")
+show_qc_plots(results_multi, wavelength = "600")
+show_qc_plots(results_multi, wavelength = "420")
 
 
-# Source your file
-source("BioTek_Synergy_HTX_Processing_v0.4.2_DEV.R")
 
-# Get all objects in the environment
-all_objects <- ls()
 
-# Filter to only functions
-functions_only <- all_objects[sapply(all_objects, function(x) is.function(get(x)))]
+# Test basic functionality
+quick_check(check)
 
-# Sort and display
-sort(functions_only)
+# Test accessing individual wavelengths
+show_growth_curves(check, wavelength = "600")
+show_growth_curves(check, wavelength = "420")
+
+# Test plate layouts
+show_plate_endpoint(check, wavelength = "600")
+show_plate_endpoint(check, wavelength = "420")
+
+# Test data export
+colleague_data_600 <- get_colleague_format(check, wavelength = "600")
+colleague_data_420 <- get_colleague_format(check, wavelength = "420")
+
+# Test QC plots
+show_qc_plots(check, wavelength = "600")
+
+
+
+
+
