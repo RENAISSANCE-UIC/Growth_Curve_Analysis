@@ -3160,12 +3160,35 @@ check_replicate_structure <- function(results) {
   return(replicate_summary)
 }
 
-#' Get data in colleague's preferred format
-#' @param results Results from main analysis
-#' @param include_untreated Include untreated controls as well
-#' @param export_to_csv Optionally export to CSV file
-#' @return List with sample data and optionally untreated data
-#' Smart get_colleague_format that works on both single and multi-wavelength results
+
+#' Get Data in Colleague's Preferred Format
+#'
+#' This function processes analysis results and returns them in a format suitable for sharing with colleagues.
+#' It supports both single and multi-wavelength data and can optionally export the results to CSV files.
+#'
+#' @param results A list containing the results from the main analysis. Can include single or multiple wavelengths.
+#' @param include_untreated Logical. If `TRUE`, includes untreated control samples in the output. Default is `TRUE`.
+#' @param export_to_csv Logical. If `TRUE`, exports the formatted data to CSV files. Default is `FALSE`.
+#' @param wavelength Character or `NULL`. Specify a wavelength (e.g., `"600"`) to extract data for a specific wavelength,
+#' `"all"` to extract all available wavelengths, or leave `NULL` to prompt for selection.
+#'
+#' @return A list containing formatted sample data. If `include_untreated` is `TRUE`, untreated control data is also included.
+#' If `wavelength = "all"`, the list will contain entries for each wavelength.
+#'
+#' @details
+#' - If multi-wavelength data is detected and `wavelength` is `NULL`, the function prompts the user to specify a wavelength.
+#' - If `wavelength = "all"`, data for all available wavelengths is returned and optionally exported.
+#' - For single-wavelength data, the function delegates to `get_colleague_format_single()`.
+#'
+#' @seealso [get_colleague_format_single()], [export_wide_format()]
+#'
+#' @examples
+#' \dontrun{
+#' get_colleague_format(results, wavelength = "600")
+#' get_colleague_format(results, wavelength = "all", export_to_csv = TRUE)
+#' }
+#'
+#' @export
 get_colleague_format <- function(results, include_untreated = TRUE, 
                                  export_to_csv = FALSE, wavelength = NULL) {
   
@@ -3249,7 +3272,37 @@ get_colleague_format <- function(results, include_untreated = TRUE,
   }
 }
 
-#' Original colleague format function for single wavelength (renamed)
+#' Export Single-Wavelength Data in Colleague Format
+#'
+#' This function formats and optionally exports single-wavelength analysis results
+#' into a wide format suitable for sharing with colleagues. It supports exporting
+#' both sample and untreated control data.
+#'
+#' @param results A list or data structure containing the results for a single wavelength.
+#' @param include_untreated Logical. If `TRUE`, includes untreated control samples in the output. Default is `TRUE`.
+#' @param export_to_csv Logical. If `TRUE`, exports the formatted data to CSV files. Default is `FALSE`.
+#' @param wavelength Character or `NULL`. Used for labeling output files (e.g., `"600"` for 600nm). Optional.
+#'
+#' @return A list with one or two elements:
+#' \describe{
+#'   \item{samples}{A data frame of sample data in wide format.}
+#'   \item{untreated}{(Optional) A data frame of untreated control data in wide format.}
+#' }
+#'
+#' @details
+#' - Uses `export_wide_format()` to reshape the data.
+#' - If `export_to_csv` is `TRUE`, writes CSV files named according to the wavelength.
+#' - Designed to be called internally by `get_colleague_format()` for single-wavelength cases.
+#'
+#' @seealso [get_colleague_format()], [export_wide_format()]
+#'
+#' @examples
+#' \dontrun{
+#' get_colleague_format_single(results, wavelength = "600")
+#' get_colleague_format_single(results, include_untreated = FALSE, export_to_csv = TRUE)
+#' }
+#'
+#' @export
 get_colleague_format_single <- function(results, include_untreated = TRUE, 
                                         export_to_csv = FALSE, wavelength = NULL) {
   
@@ -4256,7 +4309,38 @@ analyze_growth_curves_with_verification <- function(file_path, layout_type = "de
   return(results)
 }
 
-#' Main analysis function - handles both single and multi-wavelength files
+
+#' Analyze Growth Curves from Plate Reader Data
+#'
+#' This is the main analysis function that handles both single and multi-wavelength
+#' growth curve data files. It performs data processing, optional diagnostics, and
+#' summary generation.
+#'
+#' @param file_path Character. Path to the input data file (e.g., CSV or Excel) containing growth curve measurements.
+#' @param layout_type Character. Specifies the layout type used in the experiment. Default is `"default"`.
+#' @param export_summaries Logical. If `TRUE`, generates and exports summary statistics to an Excel file. Default is `FALSE`.
+#' @param run_diagnostics Logical. If `TRUE`, runs diagnostics on the corrected results. Default is `TRUE`.
+#'
+#' @return
+#' - If the input contains a single wavelength, returns a list with processed results, diagnostics (if enabled),
+#'   and summaries (if enabled).
+#' - If the input contains multiple wavelengths, returns a named list of results for each wavelength.
+#'
+#' @details
+#' - Internally calls `analyze_growth_curves_multi()` to process the input file.
+#' - For single-wavelength data, adapts the result for compatibility with downstream functions.
+#' - Diagnostics are generated using `diagnose_data_issues()`.
+#' - Summaries are generated using `summarize_replicate_results()` and optionally exported via `export_summaries_to_excel()`.
+#'
+#' @seealso [analyze_growth_curves_multi()], [diagnose_data_issues()], [summarize_replicate_results()], [export_summaries_to_excel()]
+#'
+#' @examples
+#' \dontrun{
+#' analyze_growth_curves("data/plate_reader_output.csv")
+#' analyze_growth_curves("data/plate_reader_output.csv", export_summaries = TRUE)
+#' }
+#'
+#' @export
 analyze_growth_curves <- function(file_path, layout_type = "default", 
                                   export_summaries = FALSE, 
                                   run_diagnostics = TRUE) {
