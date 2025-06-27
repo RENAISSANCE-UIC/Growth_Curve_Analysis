@@ -6,14 +6,25 @@ formats with single or multi-wavelength measurements.
 
 ## Features
 
-Universal File Support: Process both Excel (.xlsx, .xls) and CSV files
-Multi-Wavelength Analysis: Automatic detection and processing of
-multiple wavelengths (e.g., 600nm, 420nm) Automated Corrections:
-Built-in broth blank and nanoparticle interference corrections 96-Well
-Plate Layout: Pre-configured experimental layouts with biological
-replicates Quality Control: Comprehensive QC plots and data validation
-Flexible Export: Multiple export formats for downstream analysis Rich
-Visualizations: Growth curves, plate heatmaps, and comparative plots
+-   **Universal File Support:** Process both Excel (.xlsx, .xls) and CSV
+    files
+
+-   **Multi-Wavelength Analysis:** Automatic detection and processing of
+    multiple wavelengths (e.g., 600nm, 420nm)
+
+-   **Automated Corrections:** Built-in broth blank and nanoparticle
+    interference corrections
+
+-   **96-Well Plate Layout:** Pre-configured experimental layouts with
+    biological replicates
+
+-   **Quality Control:** QC plots and data validation
+
+-   **Flexible Export:** Multiple export formats for downstream analysis
+
+-   **Rich Visualizations:** Growth curves, plate heatmaps, and
+    comparative plots
+   
 
 ## Experimental Layout
 
