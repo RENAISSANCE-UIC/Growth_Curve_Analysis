@@ -1231,27 +1231,28 @@ apply_broth_correction <- function(data, broth_correction, threshold = TRUE) {
 calculate_np_corrections <- function(data_broth_corrected, method = "standard") {
   
   if (method == "standard") {
-    # Colleague's method: Same-timepoint correction D2→A2, D3→A3, etc.
-    cat("  🔬 Standard NP correction: Same-timepoint pairing\n")
+    # Colleague's method: Use RAW NP values (not broth corrected)
+    cat("  🔬 Standard NP correction: Same-timepoint pairing with RAW NP values\n")
     
+    # Get the original raw data for NP controls
     np_corrections <- data_broth_corrected %>%
       filter(sample_type == "np_control") %>%
-      select(time_hrs, time_point, od600_broth_corrected, well_id, col_number) %>%
+      select(time_hrs, time_point, od600_raw, well_id, col_number) %>%  # USE RAW!
       # Map NP control column to corresponding sample concentration
       mutate(
         concentration = paste0("Conc_", col_number - 1)
       ) %>%
-      select(time_hrs, time_point, concentration, np_correction = od600_broth_corrected)
+      select(time_hrs, time_point, concentration, np_correction = od600_raw)  # RAW!
     
   } else if (method == "robust") {
-    # Our method: Average by concentration and time
-    cat("  🔬 Robust NP correction: Averaged by concentration and time\n")
+    # Robust method: Average by concentration and time, but still use RAW
+    cat("  🔬 Robust NP correction: Averaged by concentration and time with RAW NP values\n")
     
     np_corrections <- data_broth_corrected %>%
       filter(sample_type == "np_control") %>%
-      select(time_hrs, time_point, concentration, od600_broth_corrected) %>%
+      select(time_hrs, time_point, concentration, od600_raw) %>%  # USE RAW!
       group_by(time_hrs, time_point, concentration) %>%
-      summarise(np_correction = mean(od600_broth_corrected, na.rm = TRUE), .groups = "drop")
+      summarise(np_correction = mean(od600_raw, na.rm = TRUE), .groups = "drop")  # RAW!
     
   } else {
     stop("Method must be 'standard' or 'robust'")
@@ -1264,31 +1265,28 @@ calculate_np_corrections <- function(data_broth_corrected, method = "standard") 
 calculate_np_corrections_multi <- 
   function(data_broth_corrected, method = "standard", wavelength) {
   
-  # Determine the corrected OD column
-  od_broth_corrected_column <- paste0("od", wavelength, "_broth_corrected")
+  # Use RAW OD column instead of broth-corrected
+  od_raw_column <- paste0("od", wavelength, "_raw")
   
   if (method == "standard") {
-    # Colleague's method: Same-timepoint correction
-    cat("  🔬 Standard NP correction (", wavelength, "nm): Same-timepoint pairing\n")
+    cat("  🔬 Standard NP correction (", wavelength, "nm): Same-timepoint pairing with RAW NP values\n")
     
     np_corrections <- data_broth_corrected %>%
       filter(sample_type == "np_control") %>%
-      select(time_hrs, time_point, !!od_broth_corrected_column, well_id, col_number) %>%
-      # Map NP control column to corresponding sample concentration
+      select(time_hrs, time_point, !!od_raw_column, well_id, col_number) %>%  # RAW!
       mutate(
         concentration = paste0("Conc_", col_number - 1)
       ) %>%
-      select(time_hrs, time_point, concentration, np_correction = !!od_broth_corrected_column)
+      select(time_hrs, time_point, concentration, np_correction = !!od_raw_column)  # RAW!
     
   } else if (method == "robust") {
-    # Our method: Average by concentration and time
-    cat("  🔬 Robust NP correction (", wavelength, "nm): Averaged by concentration and time\n")
+    cat("  🔬 Robust NP correction (", wavelength, "nm): Averaged by concentration and time with RAW NP values\n")
     
     np_corrections <- data_broth_corrected %>%
       filter(sample_type == "np_control") %>%
-      select(time_hrs, time_point, concentration, !!od_broth_corrected_column) %>%
+      select(time_hrs, time_point, concentration, !!od_raw_column) %>%  # RAW!
       group_by(time_hrs, time_point, concentration) %>%
-      summarise(np_correction = mean(.data[[od_broth_corrected_column]], na.rm = TRUE), .groups = "drop")
+      summarise(np_correction = mean(.data[[od_raw_column]], na.rm = TRUE), .groups = "drop")  # RAW!
     
   } else {
     stop("Method must be 'standard' or 'robust'")
@@ -2496,7 +2494,39 @@ plot_plate_heatmap_composite_multi <- function(corrected_results, wavelength) {
   ))
 }
 
-#' Quick plot for a specific concentration
+
+#' Plot Growth Curves for a Specific Concentration
+#'
+#' This function generates a detailed growth curve plot for a specified concentration,
+#' with options to include untreated controls and choose from multiple visualization styles.
+#'
+#' @param results A list returned by `analyze_growth_curves()` or one of its wrappers.
+#' @param concentration Character. The concentration to plot (e.g., `"10"` or `"50"`).
+#' @param include_untreated Logical. If `TRUE`, includes untreated control data in the plot. Default is `TRUE`.
+#' @param data_type Character. Specifies which OD data to use. Options are `"raw"`, `"broth_corrected"`, or `"corrected"` (default).
+#' @param style Character. Plotting style. Options include:
+#'   - `"default"`: Clean lines and points with color/shape by sample type and replicate.
+#'   - `"jittered"`: Adds jitter to reduce overplotting.
+#'   - `"separated"`: Facets by sample type.
+#'   - `"with_ribbons"`: Adds mean ± standard error ribbons.
+#'
+#' @return A `ggplot` object representing the growth curve for the specified concentration.
+#'
+#' @details
+#' - Internally uses `get_concentration_data()` to extract and format the data.
+#' - Supports multiple replicates and sample types.
+#' - Automatically adjusts aesthetics based on the selected style.
+#'
+#' @seealso [get_concentration_data()], [ggplot2::ggplot()]
+#'
+#' @examples
+#' \dontrun{
+#' results <- analyze_growth_curves("data/plate_reader_output.csv")
+#' plot_concentration(results, concentration = "10")
+#' plot_concentration(results, concentration = "25", style = "with_ribbons")
+#' }
+#'
+#' @export
 plot_concentration <- function(results, concentration, 
                                include_untreated = TRUE,
                                data_type = "corrected",
@@ -2638,7 +2668,36 @@ plot_concentration <- function(results, concentration,
   return(p)
 }
 
-#' Smart plot_concentrations_panel that works on both formats
+#' Generate Panel Plot of Growth Curves Across Concentrations
+#'
+#' This function creates a faceted panel plot of growth curves across multiple concentrations,
+#' supporting both single and multi-wavelength results. It allows filtering by sample type,
+#' selection of data type, and control over y-axis scaling.
+#'
+#' @param results A list returned by `analyze_growth_curves()` or one of its wrappers.
+#' @param concentrations Optional. A character vector of concentrations to include. If `NULL`, all available concentrations are shown.
+#' @param sample_types Character vector. Sample types to include (e.g., `"sample"`, `"untreated_control"`, or both). Default is `"sample"`.
+#' @param data_type Character. Specifies which OD data to use. Options are `"raw"`, `"broth_corrected"`, or `"corrected"` (default).
+#' @param free_scale Logical. If `TRUE`, allows each facet to have its own y-axis scale. Default is `FALSE`.
+#' @param wavelength Optional. Character string specifying the wavelength to use (e.g., `"600"`). Required for multi-wavelength results.
+#'
+#' @return A `ggplot` object showing growth curves across concentrations in a faceted layout, or `NULL` if no wavelength is specified in a multi-wavelength result.
+#'
+#' @details
+#' - Automatically detects whether the input contains single or multiple wavelengths.
+#' - If `wavelength` is not specified for multi-wavelength results, the function prompts the user.
+#' - Internally calls `plot_concentrations_panel_single()` for plotting.
+#'
+#' @seealso [show_concentrations_panel()], [plot_concentration()]
+#'
+#' @examples
+#' \dontrun{
+#' results <- analyze_growth_curves("data/plate_reader_output.csv")
+#' plot_concentrations_panel(results, sample_types = c("sample", "untreated_control"))
+#' plot_concentrations_panel(results, wavelength = "600", free_scale = TRUE)
+#' }
+#'
+#' @export
 plot_concentrations_panel <- function(results, concentrations = NULL, 
                                       sample_types = "sample", data_type = "corrected",
                                       free_scale = FALSE, wavelength = NULL) {
@@ -2771,7 +2830,30 @@ plot_concentrations_panel_single <- function(corrected_results, concentrations =
   return(p)
 }
 
-#' Show concentration panel plot (accessor function)
+#' Display Panel Plot of Growth Curves Across Concentrations
+#'
+#' This function displays a faceted panel plot of growth curves across multiple concentrations.
+#' It acts as a user-friendly wrapper around `plot_concentrations_panel()` and supports
+#' filtering by sample type and wavelength.
+#'
+#' @param results A list returned by `analyze_growth_curves()` or one of its wrappers.
+#' @param concentrations Optional. A character vector of concentrations to include. If `NULL`, all available concentrations are shown.
+#' @param sample_types Character vector. Sample types to include (e.g., `"sample"`, `"untreated_control"`, or both). Default is `"sample"`.
+#' @param free_scale Logical. If `TRUE`, allows each facet to have its own y-axis scale. Default is `FALSE`.
+#' @param wavelength Optional. Character string specifying the wavelength to use (e.g., `"600"`). Only needed for multi-wavelength results.
+#'
+#' @return A `ggplot` object showing growth curves across concentrations in a faceted layout.
+#'
+#' @seealso [plot_concentrations_panel()], [plot_concentration()]
+#'
+#' @examples
+#' \dontrun{
+#' results <- analyze_growth_curves("data/plate_reader_output.csv")
+#' show_concentrations_panel(results)
+#' show_concentrations_panel(results, concentrations = c("10", "25", "50"), free_scale = TRUE)
+#' }
+#'
+#' @export
 show_concentrations_panel <- function(results, concentrations = NULL, 
                                       sample_types = "sample", free_scale = FALSE, 
                                       wavelength = NULL) {
@@ -3331,12 +3413,37 @@ validate_experiment_layout <- function(processed_data) {
 
 
 # ===== ACCESSOR FUNCTIONS =====
-#' Export data in wide format with proper replicate handling
-#' @param results Results from analyze_growth_curves_with_summaries()
-#' @param data_type Which data to export: "raw", "broth_corrected", "corrected"  
-#' @param sample_types Which sample types to include: "sample", "untreated_control", or both
-#' @return Wide format data frame with proper column ordering
-#' Export wide format that works with any wavelength
+
+#' Export Growth Curve Data in Wide Format with Replicate Handling
+#'
+#' This function reshapes growth curve data into a wide format, including individual replicates,
+#' averages, and standard deviations for each concentration. It supports any wavelength and
+#' allows filtering by sample type.
+#'
+#' @param results A list object returned by `analyze_growth_curves()` or `analyze_growth_curves_with_summaries()`.
+#' @param data_type Character. Specifies which OD data to export. Options are `"raw"`, `"broth_corrected"`, or `"corrected"` (default).
+#' @param sample_types Character vector. Specifies which sample types to include. Options include `"sample"`, `"untreated_control"`, or both.
+#'
+#' @return A data frame in wide format with:
+#' - Time points as rows
+#' - Columns for each replicate (e.g., `"10_A"`, `"10_B"`)
+#' - AVERAGE columns (e.g., `"AVERAGE_10"`)
+#' - SD columns (e.g., `"SD_10"`) if multiple replicates exist
+#'
+#' @details
+#' - Automatically detects the wavelength from the OD column names.
+#' - Concentration columns are sorted numerically for clarity.
+#' - If only one replicate exists, SD columns are filled with `NA` for consistency.
+#'
+#' @seealso [export_untreated_wide()], [analyze_growth_curves()]
+#'
+#' @examples
+#' \dontrun{
+#' results <- analyze_growth_curves("data/plate_reader_output.csv")
+#' wide_data <- export_wide_format(results, data_type = "corrected", sample_types = c("sample", "untreated_control"))
+#' }
+#'
+#' @export
 export_wide_format <- function(results, data_type = "corrected", 
                                sample_types = "sample") {
   
@@ -3432,7 +3539,31 @@ export_wide_format <- function(results, data_type = "corrected",
   return(result)
 }
 
-#' Separate function for untreated controls (cleaner approach)
+#' Export Untreated Control Data in Wide Format
+#'
+#' This function extracts untreated control data from the results of a growth curve analysis
+#' and reshapes it into a wide format, with time points as rows and concentrations as columns.
+#' It supports different data types (raw, broth-corrected, or fully corrected).
+#'
+#' @param results A list object returned by `analyze_growth_curves()` containing processed growth curve data.
+#' @param data_type Character. Specifies which OD data to export. Options are `"raw"`, `"broth_corrected"`, or `"corrected"` (default).
+#'
+#' @return A data frame in wide format with time points as rows and OD600 values for each untreated concentration as columns.
+#'
+#' @details
+#' - Only untreated control samples (`sample_type == "untreated_control"`) are included.
+#' - Concentration columns are sorted numerically for clarity.
+#' - The function assumes a single replicate per concentration for untreated controls.
+#'
+#' @seealso [analyze_growth_curves()], [pivot_wider()]
+#'
+#' @examples
+#' \dontrun{
+#' results <- analyze_growth_curves("data/plate_reader_output.csv")
+#' untreated_wide <- export_untreated_wide(results)
+#' }
+#'
+#' @export
 export_untreated_wide <- function(results, data_type = "corrected") {
   
   # Select the appropriate OD column
@@ -3698,13 +3829,36 @@ get_samples_wide_raw <- function(results) {
   export_wide_format(results, data_type = "raw", sample_types = "sample")
 }
 
-#' Get data for a specific concentration
-#' @param results Results from main analysis
-#' @param concentration Which concentration to extract (e.g., "Conc_5")
-#' @param sample_type Which sample type: "sample", "untreated_control", or "both"
-#' @param data_type Which data: "raw", "broth_corrected", "corrected"  
-#' @param format Output format: "long" or "wide"
-#' @return Data for the specified concentration
+
+#' Extract Data for a Specific Concentration
+#'
+#' This function retrieves growth curve data for a specified concentration from the analysis results.
+#' It supports filtering by sample type, selecting the data correction level, and choosing between long or wide format.
+#'
+#' @param results A list returned by `analyze_growth_curves()` or one of its wrappers.
+#' @param concentration Character. The concentration to extract (e.g., `"Conc_5"`).
+#' @param sample_type Character. Which sample type to include: `"sample"`, `"untreated_control"`, or `"both"`. Default is `"sample"`.
+#' @param data_type Character. Which OD data to extract. Options are `"raw"`, `"broth_corrected"`, or `"corrected"` (default).
+#' @param format Character. Output format: `"long"` (default) or `"wide"`.
+#'
+#' @return A data frame containing the requested data. If `format = "wide"`, the output includes one column per sample-replicate combination.
+#' Returns `NULL` if no data is found for the specified concentration.
+#'
+#' @details
+#' - Automatically selects the appropriate OD column based on the `data_type`.
+#' - If no data is found for the requested concentration, the function prints available options.
+#' - In wide format, columns are named using the pattern `"sampletype_replicate"` (e.g., `"sample_Rep_A"`).
+#'
+#' @seealso [plot_concentration()], [export_wide_format()]
+#'
+#' @examples
+#' \dontrun{
+#' results <- analyze_growth_curves("data/plate_reader_output.csv")
+#' data_long <- get_concentration_data(results, concentration = "10", format = "long")
+#' data_wide <- get_concentration_data(results, concentration = "10", format = "wide")
+#' }
+#'
+#' @export
 get_concentration_data <- function(results, concentration, 
                                    sample_type = "sample", 
                                    data_type = "corrected",
@@ -3849,7 +4003,35 @@ browse_concentrations <- function(results) {
   return(available_concs)
 }
 
-#' Display the composite plot
+
+#' Display Composite Plate Layout Plot
+#'
+#' This function displays a composite 2×2 panel plot showing the initial and final
+#' plate layouts, both raw and corrected. It supports both single and multi-wavelength
+#' results and allows users to specify which wavelength to display.
+#'
+#' @param results A list returned by `analyze_growth_curves()` or one of its wrappers.
+#' @param wavelength Optional. Character string specifying the wavelength to display (e.g., `"600"`).
+#' Use `"all"` to display all available wavelengths. If `NULL`, the function prompts the user.
+#'
+#' @return Invisibly returns a list of ggplot objects if `wavelength = "all"`, otherwise prints the selected composite plot.
+#'
+#' @details
+#' - For multi-wavelength results, the function looks for elements named like `"wavelength_600"`, `"wavelength_420"`, etc.
+#' - If no wavelength is specified, the function lists available options.
+#' - The composite plot typically includes raw initial, corrected initial, raw final, and corrected final plate layouts.
+#'
+#' @seealso [show_plate_endpoint()], [show_growth_curves()]
+#'
+#' @examples
+#' \dontrun{
+#' results <- analyze_growth_curves("data/plate_reader_output.csv")
+#' show_plate_composite(results) # Auto-detects format
+#' show_plate_composite(results, wavelength = "600")
+#' show_plate_composite(results, wavelength = "all")
+#' }
+#'
+#' @export
 show_plate_composite <- function(results, wavelength = NULL) {
   
   if ("wavelength_600" %in% names(results) || "wavelength_420" %in% names(results)) {
@@ -3898,8 +4080,35 @@ show_plate_composite <- function(results, wavelength = NULL) {
   }
 }
 
-#' Display the final plate layout
-#' Smart show_plate_endpoint that works on both formats
+
+#' Display Final Plate Layout from Growth Curve Results
+#'
+#' This function displays the final plate layout plot from the results of `analyze_growth_curves()`.
+#' It supports both single and multi-wavelength formats and allows users to specify which
+#' wavelength to display.
+#'
+#' @param results A list returned by `analyze_growth_curves()` or one of its wrappers.
+#' @param wavelength Optional. Character string specifying the wavelength to display (e.g., `"600"`).
+#' Use `"all"` to display all available wavelengths. If `NULL`, the function prompts the user.
+#'
+#' @return Invisibly returns a list of ggplot objects if `wavelength = "all"`, otherwise prints the selected plot.
+#'
+#' @details
+#' - For multi-wavelength results, the function looks for elements named like `"wavelength_600"`, `"wavelength_420"`, etc.
+#' - If no wavelength is specified, the function lists available options.
+#' - If a single wavelength is detected, the corresponding final plate layout is shown directly.
+#'
+#' @seealso [show_growth_curves()], [analyze_growth_curves()]
+#'
+#' @examples
+#' \dontrun{
+#' results <- analyze_growth_curves("data/plate_reader_output.csv")
+#' show_plate_endpoint(results) # Auto-detects format
+#' show_plate_endpoint(results, wavelength = "600")
+#' show_plate_endpoint(results, wavelength = "all")
+#' }
+#'
+#' @export
 show_plate_endpoint <- function(results, wavelength = NULL) {
   
   if ("wavelength_600" %in% names(results) || "wavelength_420" %in% names(results)) {
@@ -4004,7 +4213,36 @@ show_plate_initial_condition <- function(results, wavelength = NULL) {
   }
 }
 
-#' Smart show_growth_curves that works on both formats
+
+#' Display Growth Curve Plots from Analysis Results
+#'
+#' This function displays growth curve plots from the results of `analyze_growth_curves()`.
+#' It automatically detects whether the input contains single or multiple wavelengths and
+#' adapts accordingly. For multi-wavelength results, users can specify a wavelength or
+#' choose to display all.
+#'
+#' @param results A list returned by `analyze_growth_curves()` or one of its wrappers.
+#' @param wavelength Optional. Character string specifying the wavelength to display (e.g., `"600"`).
+#' Use `"all"` to display all available wavelengths. If `NULL`, the function prompts the user.
+#'
+#' @return Invisibly returns a list of ggplot objects if `wavelength = "all"`, otherwise prints the selected plot.
+#'
+#' @details
+#' - For multi-wavelength results, the function looks for elements named like `"wavelength_600"`, `"wavelength_420"`, etc.
+#' - If no wavelength is specified, the function lists available options.
+#' - If a single wavelength is detected, the corresponding plot is shown directly.
+#'
+#' @seealso [analyze_growth_curves()], [ggplot2::ggplot()]
+#'
+#' @examples
+#' \dontrun{
+#' results <- analyze_growth_curves("data/plate_reader_output.csv")
+#' show_growth_curves(results) # Auto-detects format
+#' show_growth_curves(results, wavelength = "600")
+#' show_growth_curves(results, wavelength = "all")
+#' }
+#'
+#' @export
 show_growth_curves <- function(results, wavelength = NULL) {
   
   # Detect if this is multi-wavelength results
@@ -4066,7 +4304,36 @@ show_layout_validation <- function(results) {
   print(results$plots$qc_plots$layout_validation)
 }
 
-#' Show all QC plots at once
+#' Display Quality Control (QC) Plots from Growth Curve Analysis
+#'
+#' This function displays a set of diagnostic plots used to assess the quality of growth curve data
+#' and correction procedures. It supports both single and multi-wavelength results and allows users
+#' to view QC plots for a specific wavelength or all wavelengths.
+#'
+#' @param results A list returned by `analyze_growth_curves()` or one of its wrappers.
+#' @param wavelength Optional. Character string specifying the wavelength to display (e.g., `"600"`).
+#' Use `"all"` to display QC plots for all available wavelengths. If `NULL`, the function prompts the user.
+#'
+#' @return Invisibly prints a set of QC plots to the console.
+#'
+#' @details
+#' The following QC plots are displayed for each wavelength:
+#' - **Broth Stability**: Checks consistency of broth-only wells over time.
+#' - **Blank Stability**: Assesses baseline noise in blank wells.
+#' - **NP Kinetics**: Visualizes nanoparticle behavior over time.
+#' - **Before vs After Correction**: Compares raw and corrected OD values.
+#'
+#' @seealso [analyze_growth_curves()], [quick_check()]
+#'
+#' @examples
+#' \dontrun{
+#' results <- analyze_growth_curves("data/plate_reader_output.csv")
+#' show_qc_plots(results)
+#' show_qc_plots(results, wavelength = "600")
+#' show_qc_plots(results, wavelength = "all")
+#' }
+#'
+#' @export
 show_qc_plots <- function(results, wavelength = NULL) {
   
   if ("wavelength_600" %in% names(results) || "wavelength_420" %in% names(results)) {
@@ -4147,7 +4414,26 @@ show_qc_plots <- function(results, wavelength = NULL) {
   }
 }
 
-#' Get the final corrected data in long format
+
+#' Extract Final Corrected Growth Curve Data
+#'
+#' This function retrieves the final corrected data in long format from the results
+#' of a growth curve analysis.
+#'
+#' @param results A list returned by `analyze_growth_curves()` or one of its wrappers.
+#'
+#' @return A data frame containing the corrected growth curve data in long format.
+#'
+#' @seealso [analyze_growth_curves()], [export_wide_format()]
+#'
+#' @examples
+#' \dontrun{
+#' results <- analyze_growth_curves("data/plate_reader_output.csv")
+#' corrected_data <- get_corrected_data(results)
+#' head(corrected_data)
+#' }
+#'
+#' @export
 get_corrected_data <- function(results) {
   results$corrected_results$corrected_data
 }
@@ -4157,7 +4443,27 @@ get_raw_data <- function(results) {
   results$corrected_results$raw_data
 }
 
-#' Get metadata from the experiment
+
+#' Extract Experiment Metadata
+#'
+#' This function retrieves metadata associated with the experiment from the analysis results.
+#' Metadata may include information such as experiment date, plate layout, instrument settings,
+#' or user-defined annotations.
+#'
+#' @param results A list returned by `analyze_growth_curves()` or one of its wrappers.
+#'
+#' @return A list or data frame containing experiment metadata, depending on how it was stored.
+#'
+#' @seealso [analyze_growth_curves()], [get_corrected_data()]
+#'
+#' @examples
+#' \dontrun{
+#' results <- analyze_growth_curves("data/plate_reader_output.csv")
+#' metadata <- get_experiment_metadata(results)
+#' str(metadata)
+#' }
+#'
+#' @export
 get_experiment_metadata <- function(results) {
   results$processed_data$metadata
 }
@@ -4254,7 +4560,31 @@ show_plot_styles <- function(results, concentration = NULL) {
   return(styles)
 }
 
-#' Smart quick_check that works on both single and multi-wavelength results
+
+#' Quick Summary Check of Growth Curve Results
+#'
+#' This function provides a quick diagnostic summary of the processed growth curve data,
+#' including data size, time range, sample type distribution, and basic quality checks.
+#' It supports both single and multi-wavelength result formats.
+#'
+#' @param results A list returned by `analyze_growth_curves()` or one of its wrappers.
+#'
+#' @return Invisibly prints a summary of the dataset to the console.
+#'
+#' @details
+#' - For multi-wavelength results, the function iterates over each wavelength and reports key metrics.
+#' - For single-wavelength results, it also checks for potential issues such as negative OD values or unusually high readings.
+#' - This function is intended for quick inspection and debugging.
+#'
+#' @seealso [analyze_growth_curves()], [get_corrected_data()]
+#'
+#' @examples
+#' \dontrun{
+#' results <- analyze_growth_curves("data/plate_reader_output.csv")
+#' quick_check(results)
+#' }
+#'
+#' @export
 quick_check <- function(results) {
   
   cat("• QUICK DATA CHECK\n")
@@ -4384,20 +4714,6 @@ get_experiment_metadata <- function(results) {
   results$processed_data$metadata
 }
 
-#' Helper function to extract individual wavelength
-get_wavelength <- function(results, wavelength) {
-  wavelength_key <- paste0("wavelength_", wavelength)
-  
-  if (wavelength_key %in% names(results)) {
-    return(results[[wavelength_key]])
-  } else if ("corrected_results" %in% names(results)) {
-    # Already single wavelength
-    return(results)
-  } else {
-    available <- names(results)[str_detect(names(results), "^wavelength_")]
-    stop("Wavelength ", wavelength, " not found. Available: ", paste(available, collapse = ", "))
-  }
-}
 
 # ===== HELPER FUNCTIONS ====
 #' Convert time to decimal hours - handles both HH:MM:SS and decimal formats
@@ -4430,6 +4746,45 @@ convert_time_to_hours <- function(time_values) {
     numeric_val <- suppressWarnings(as.numeric(time_str))
     return(numeric_val)
   })
+}
+
+#' Extract Results for a Specific Wavelength
+#'
+#' This helper function retrieves the results corresponding to a specific wavelength
+#' from a multi-wavelength analysis result. If the input is already a single-wavelength
+#' result, it returns the input unchanged.
+#'
+#' @param results A list returned by `analyze_growth_curves()` or one of its wrappers.
+#' @param wavelength Character. The wavelength to extract (e.g., `"600"`).
+#'
+#' @return A list containing the results for the specified wavelength.
+#' If the input is already a single-wavelength result, it is returned as-is.
+#'
+#' @details
+#' - For multi-wavelength results, the function looks for elements named like `"wavelength_600"`.
+#' - If the specified wavelength is not found, an informative error is raised listing available options.
+#'
+#' @seealso [analyze_growth_curves()], [show_growth_curves()]
+#'
+#' @examples
+#' \dontrun{
+#' results <- analyze_growth_curves("data/plate_reader_output.csv")
+#' wl600 <- get_wavelength(results, "600")
+#' }
+#'
+#' @export
+get_wavelength <- function(results, wavelength) {
+  wavelength_key <- paste0("wavelength_", wavelength)
+  
+  if (wavelength_key %in% names(results)) {
+    return(results[[wavelength_key]])
+  } else if ("corrected_results" %in% names(results)) {
+    # Already single wavelength
+    return(results)
+  } else {
+    available <- names(results)[str_detect(names(results), "^wavelength_")]
+    stop("Wavelength ", wavelength, " not found. Available: ", paste(available, collapse = ", "))
+  }
 }
 
 # ===== SAFE STATISTICAL FUNCTIONS =====
@@ -4667,6 +5022,8 @@ analyze_growth_curves_with_verification <- function(file_path, layout_type = "de
 #' @param layout_type Character. Specifies the layout type used in the experiment. Default is `"default"`.
 #' @param export_summaries Logical. If `TRUE`, generates and exports summary statistics to an Excel file. Default is `FALSE`.
 #' @param run_diagnostics Logical. If `TRUE`, runs diagnostics on the corrected results. Default is `TRUE`.
+#' @param correction_method Character. Method used for correcting raw data. Default is `"standard"`.
+#' @param threshold Logical. If `TRUE`, applies thresholding during correction. Default is `TRUE`.
 #'
 #' @return
 #' - If the input contains a single wavelength, returns a list with processed results, diagnostics (if enabled),
@@ -4758,7 +5115,28 @@ analyze_growth_curves <- function(file_path, layout_type = "default",
   })
 }
 
-#' Convenience wrapper for robust method (statistical approach)
+
+#' Analyze Growth Curves Using Robust Correction Method
+#'
+#' This is a convenience wrapper around `analyze_growth_curves()` that applies
+#' the `"robust"` correction method with thresholding enabled. It simplifies
+#' analysis setup for users who prefer a statistically robust approach.
+#'
+#' @param file_path Character. Path to the input data file (e.g., CSV or Excel) containing growth curve measurements.
+#' @param layout_type Character. Specifies the layout type used in the experiment. Default is `"default"`.
+#' @param export_summaries Logical. If `TRUE`, generates and exports summary statistics to an Excel file. Default is `FALSE`.
+#' @param run_diagnostics Logical. If `TRUE`, runs diagnostics on the corrected results. Default is `TRUE`.
+#'
+#' @return A list of processed results, either for a single wavelength or multiple wavelengths, depending on the input data.
+#'
+#' @seealso [analyze_growth_curves()]
+#'
+#' @examples
+#' \dontrun{
+#' analyze_growth_curves_robust("data/plate_reader_output.csv")
+#' }
+#'
+#' @export
 analyze_growth_curves_robust <- function(file_path, layout_type = "default", 
                                          export_summaries = FALSE, 
                                          run_diagnostics = TRUE) {
@@ -4772,7 +5150,28 @@ analyze_growth_curves_robust <- function(file_path, layout_type = "default",
   )
 }
 
-#' Convenience wrapper for standard method (colleague's approach)
+
+#' Analyze Growth Curves Using Standard Correction Method
+#'
+#' This is a convenience wrapper around `analyze_growth_curves()` that applies
+#' the `"standard"` correction method without thresholding. It reflects the
+#' default approach and is suitable for general use cases.
+#'
+#' @param file_path Character. Path to the input data file (e.g., CSV or Excel) containing growth curve measurements.
+#' @param layout_type Character. Specifies the layout type used in the experiment. Default is `"default"`.
+#' @param export_summaries Logical. If `TRUE`, generates and exports summary statistics to an Excel file. Default is `FALSE`.
+#' @param run_diagnostics Logical. If `TRUE`, runs diagnostics on the corrected results. Default is `TRUE`.
+#'
+#' @return A list of processed results, either for a single wavelength or multiple wavelengths, depending on the input data.
+#'
+#' @seealso [analyze_growth_curves()]
+#'
+#' @examples
+#' \dontrun{
+#' analyze_growth_curves_standard("data/plate_reader_output.csv")
+#' }
+#'
+#' @export
 analyze_growth_curves_standard <- function(file_path, layout_type = "default", 
                                            export_summaries = FALSE, 
                                            run_diagnostics = TRUE) {
@@ -4786,8 +5185,29 @@ analyze_growth_curves_standard <- function(file_path, layout_type = "default",
   )
 }
 
-#' Wrapper function for warnings control
-#' Convenience wrapper for full analysis with summaries
+
+#' Run Full Growth Curve Analysis with Summaries
+#'
+#' This is a convenience wrapper around `analyze_growth_curves()` that simplifies
+#' running a full analysis with diagnostics and optional summary export.
+#' It automatically enables diagnostics and applies thresholding only when the
+#' correction method is `"robust"`.
+#'
+#' @param file_path Character. Path to the input data file (e.g., CSV or Excel) containing growth curve measurements.
+#' @param export_summaries Logical. If `TRUE`, generates and exports summary statistics to an Excel file. Default is `TRUE`.
+#' @param method Character. Correction method to use. Default is `"standard"`. If `"robust"`, thresholding is enabled.
+#'
+#' @return A list of processed results, either for a single wavelength or multiple wavelengths, depending on the input data.
+#'
+#' @seealso [analyze_growth_curves()]
+#'
+#' @examples
+#' \dontrun{
+#' run_analysis("data/plate_reader_output.csv")
+#' run_analysis("data/plate_reader_output.csv", method = "robust")
+#' }
+#'
+#' @export
 run_analysis <- function(file_path, export_summaries = TRUE, 
                          method = "standard") {
   analyze_growth_curves(
@@ -5228,10 +5648,6 @@ find_wavelength_sections_csv <- function(all_data) {
 }
 
 
-
-
-
-
 # ==== META FUNCTIONS ====
 #' Update Function Parameters in Source Code
 #'
@@ -5328,6 +5744,7 @@ show_growth_curves(results_single)
 show_plate_composite(results_single)
 show_qc_plots(results_single)
 plot_concentrations_panel(results_single)
+show_plate_endpoint(results_single)
 
 # Test multi-wavelength
 
@@ -5335,5 +5752,13 @@ check <- analyze_growth_curves("25-06-17_AgNP_cubes_DP_raw_plate_layout.csv")
 check$wavelength_600$corrected_results$corrected_data %>% tail()
 get_colleague_format(check, wavelength = "600")
 
-results_multi <- analyze_growth_curves("25-06-17_AgNP_cubes_DP_raw_plate_layout.xlsx")
-results_multi$wavelength_600$corrected_results$corrected_data %>% tail()
+results_multi <- 
+  analyze_growth_curves("25-06-17_AgNP_cubes_DP_raw_plate_layout.xlsx", 
+                        correction_method = "robust")
+quick_check(results_multi)
+show_growth_curves(results_multi, wavelength = "600")
+show_plate_composite(results_single, wavelength = "600")
+show_qc_plots(results_single, wavelength = "600")
+plot_concentrations_panel(results_single, wavelength = "600")
+plot_concentration(results_single, concentration = "Conc_1")
+
