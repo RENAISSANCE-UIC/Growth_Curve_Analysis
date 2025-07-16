@@ -662,6 +662,10 @@ server <- function(input, output, session) {
   # Add this reactive value for mode
   mode_value <- reactiveVal("Drag")  # Default value
   
+  # ADD THESE: Non-reactive storage for auto-capture
+  latest_export_data <- NULL
+  latest_well_assignments <- NULL
+  
   # Add this observer to handle mode changes
   observeEvent(input$mode, {
     if (!is.null(input$mode) && input$mode != "") {
@@ -812,6 +816,20 @@ server <- function(input, output, session) {
     }
     
     export_data[, col_order[col_order %in% names(export_data)]]
+  })
+  
+  # ADD THIS: Observer to update non-reactive storage whenever data changes
+  observe({
+    # Update non-reactive copies whenever reactive values change
+    latest_well_assignments <<- well_assignments()
+    
+    # Also update the enhanced export data
+    tryCatch({
+      latest_export_data <<- enhanced_export_data()
+    }, error = function(e) {
+      # If enhanced export fails, just use basic assignments
+      latest_export_data <<- well_assignments()
+    })
   })
   
   # Render the enhanced plate plot
@@ -1021,7 +1039,57 @@ server <- function(input, output, session) {
       write.csv(enhanced_export_data(), file, row.names = FALSE, na = "")
     }
   )
+  
+  # === AUTO-CAPTURE FUNCTIONALITY (UPDATED) ===
+  
+  # Auto-capture on app close
+  if (Sys.getenv("PLATE_CAPTURE_ENABLED") == "TRUE") {
+    
+    # Add onStop callback to capture data when app closes
+    onStop(function() {
+      capture_file <- Sys.getenv("PLATE_CAPTURE_FILE")
+      
+      if (capture_file != "") {
+        tryCatch({
+          # Use the non-reactive stored data
+          final_data <- latest_export_data
+          
+          if (!is.null(final_data) && nrow(final_data) > 0) {
+            # Use base R write.csv as fallback if readr not available
+            if (require(readr, quietly = TRUE)) {
+              write_csv(final_data, capture_file)
+            } else {
+              write.csv(final_data, capture_file, row.names = FALSE, na = "")
+            }
+            cat("📋 Layout auto-saved to:", capture_file, "\n")
+          } else {
+            cat("⚠️ No layout data to save\n")
+          }
+          
+        }, error = function(e) {
+          cat("❌ Error auto-saving layout:", e$message, "\n")
+          
+          # Try to save basic well assignments as fallback
+          tryCatch({
+            basic_data <- latest_well_assignments
+            if (!is.null(basic_data) && nrow(basic_data) > 0) {
+              write.csv(basic_data, capture_file, row.names = FALSE)
+              cat("📋 Basic layout saved as fallback\n")
+            }
+          }, error = function(e2) {
+            cat("❌ Fallback save also failed:", e2$message, "\n")
+          })
+        })
+      }
+      
+      cat("🔄 Stopping app...\n")
+      try(stopApp(), silent = TRUE)      
+      
+    })
+  }
+  
 }
+
 
 if (!exists("SOURCED_FROM_FUNCTION")) {
   shinyApp(ui, server)
