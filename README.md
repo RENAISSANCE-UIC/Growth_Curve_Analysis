@@ -100,7 +100,8 @@ layout_data <- launch_plate_editor()
 # 2. Run analysis with custom layout  
 results <- analyze_growth_curves("data.xlsx", layout_csv = "plate_layout.csv")   
 
-# 3. Verify layout  verify_experimental_layout(results$processed_data)
+# 3. Verify layout
+verify_experimental_layout(results$processed_data)
 ```
 
 ### Compare Correction Methods
@@ -231,8 +232,8 @@ data_600nm <- get_colleague_format(multi_results, wavelength = "600")
 ## Interactive Layout Editor
 
 ``` r
-# Launch interactive editor  l
-ayout_data <- launch_plate_editor()   
+# Launch interactive editor
+layout_data <- launch_plate_editor()   
 
 # Use captured layout  
 results <- analyze_growth_curves("data.xlsx", layout_csv = "captured_layout.csv")
@@ -254,7 +255,11 @@ results <- analyze_growth_curves("data.xlsx", layout_csv = "captured_layout.csv"
 
 ## Output Files
 
-The package can generate several output files: - **Growth curve data**: CSV files with processed data - **Summary reports**: Excel files with comprehensive statistics - **Plot exports**: PNG files of visualizations - **Layout files**: CSV files defining plate layouts
+The package can generate several output files: 
+- **Growth curve data**: CSV files with processed data
+- **Summary reports**: Excel files with comprehensive statistics
+- **Plot exports**: PNG files of visualizations
+- **Layout files**: CSV files defining plate layouts
 
 ## Support
 
