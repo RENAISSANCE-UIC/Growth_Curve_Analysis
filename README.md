@@ -292,13 +292,13 @@ results <- analyze_growth_curves("data.xlsx", layout_csv = "captured_layout.csv"
 
 ## File Format Support
 
-### Synergy HTX
+### Synergy HTX (Agilent BioTek)
 
 -   **Excel files**: `.xlsx`, `.xls`
 -   **CSV files**: Exported from BioTek Synergy software
 -   **Multi-wavelength**: Automatic detection of wavelength sections
 
-### Cerillo
+### Stratus (Cerillo) 
 
 -   **CSV format**: Direct export from Cerillo software
 -   **Single wavelength**: 600nm optical density (assumed)
