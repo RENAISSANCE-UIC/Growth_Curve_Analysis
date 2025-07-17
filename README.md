@@ -37,7 +37,7 @@ library(readr)    # For CSV operations
 setup_workspace()    
 
 # Run analysis with default settings  
-results <- analyze_growth_curves(\"your_data_file.xlsx\")    
+results <- analyze_growth_curves("your_data_file.xlsx")    
 
 # View results  
 show_growth_curves(results)  
