@@ -262,7 +262,7 @@ For issues with specific file formats or analysis methods, use the diagnostic fu
 
 ## Additional Features
 
-## Default Experimental Layout
+### Default Experimental Layout (96-w/p example)
 
 ```{=html}
 
