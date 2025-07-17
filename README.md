@@ -1,9 +1,3 @@
----
-title: "README"
-output: html_document
-date: "2025-07-17"
----
-
 ## Microbial Growth Curve Analysis
 
 A comprehensive R package for analyzing growth curve data from 96-well plate readers, with support for multiple plate reader formats and data correction methods, as well as custom plate designs.
