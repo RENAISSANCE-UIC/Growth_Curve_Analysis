@@ -118,16 +118,13 @@ show_growth_curves(all_methods$robust)
 ## Data Structure and Object Access   
 
 ### Main Analysis Results    
-The `analyze_growth_curves()` function returns a structured list object containing multiple components:    
-```r  
-results <- analyze_growth_curves("data.xlsx") 
-str(results, max.level = 2)  
-
-# View the structure  
-```   
+The `analyze_growth_curves()` function returns a structured S3 list object containing multiple components.    
 
 ### Single Wavelength Results Structure    
-```r  
+```r
+results <- analyze_growth_curves("data.xlsx")
+
+# Returns a named list (S3 object) with the following components:  
 results  
 ├── processed_data          # Raw processed data with layout
 │   ├── metadata            # Experiment metadata from file
@@ -154,6 +151,7 @@ results
 ### Multi-Wavelength Results Structure    
 ```r  
 multi_results <- analyze_growth_curves_multi("data.xlsx")  
+
 # Returns a named list with one entry per wavelength:    
 multi_results
 ├── wavelength_600          # 600nm results
