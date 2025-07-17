@@ -88,7 +88,7 @@ show_plate_endpoint(results)
 colleague_data <- get_colleague_format(results, export_to_csv = TRUE)    
 
 # 5. Quality control  
-show_qc_plots(results
+show_qc_plots(results)
 ```
 
 ### Custom Layout Workflow
