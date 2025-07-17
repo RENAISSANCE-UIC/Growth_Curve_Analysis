@@ -115,6 +115,59 @@ show_growth_curves(all_methods$standard)
 show_growth_curves(all_methods$robust)  
 ```
 
+## Data Structure and Object Access   
+
+### Main Analysis Results    
+The `analyze_growth_curves()` function returns a structured list object containing multiple components:    
+```r  
+results <- analyze_growth_curves("data.xlsx") 
+str(results, max.level = 2)  
+
+# View the structure  
+```   
+
+### Single Wavelength Results Structure    
+```r  
+results  
+├── processed_data          # Raw processed data with layout
+│   ├── metadata            # Experiment metadata from file
+│   ├── data                # Raw data merged with layout
+│   ├── layout              # Plate layout information
+│   └── summary             # Basic data summary
+├── corrected_results       # Corrected data and statistics
+│   ├── raw_data            # Original uncorrected data
+│   ├── corrected_data      # Fully corrected data
+│   ├── replicate_stats     # Summary statistics by replicate
+│   └── corrections         # Correction values applied
+├── plots                   # All visualization objects
+│   ├── growth_curves       # Main growth curve plot
+│   ├── initial_plate       # Initial plate heatmap
+│   ├── final_plate         # Final plate heatmap
+│   ├── plate_composite     # Before/after comparison
+│   ├── concentrations_panel # Concentration panel plot
+│   └── qc_plots            # Quality control plots
+├── correction_method       # Method used ("standard", "robust", "traditional")
+├── threshold               # Whether thresholding was applied
+└── wavelength              # Wavelength analyzed (if applicable)  
+```   
+
+### Multi-Wavelength Results Structure    
+```r  
+multi_results <- analyze_growth_curves_multi("data.xlsx")  
+# Returns a named list with one entry per wavelength:    
+multi_results
+├── wavelength_600          # 600nm results
+│   ├── processed_data      # Same structure as single wavelength
+│   ├── corrected_results   # Same structure as single wavelength
+│   ├── plots               # Same structure as single wavelength
+│   ├── wavelength          # "600"
+│   ├── correction_method   # Method used
+│   └── threshold           # Thresholding setting
+├── wavelength_420          # 420nm results (if present)
+│   └── [same structure]
+└── wavelength_XXX          # Additional wavelengths  
+```    
+
 ## Correction Methods
 
 ### Standard Method (Recommended)
