@@ -4,7 +4,7 @@ A comprehensive R package for analyzing growth curve data from 96-well plate rea
 
 ## Features
 
--   **Multi-format support**: Current version works with Synergy HTX (Excel/CSV) and Cerillo CSV files
+-   **Multi-format support**: Current version works with Synergy HTX (Excel/CSV) and Cerillo Stratus CSV files
 -   **Automatic plate reader detection**: Automatically identifies file format
 -   **Multiple correction methods**: Traditional, robust, and standard contamination-safe corrections
 -   **Custom plate layouts**: Design layouts with interactive Shiny interface or CSV import
