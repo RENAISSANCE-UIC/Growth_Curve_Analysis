@@ -265,7 +265,7 @@ For issues with specific file formats or analysis methods, use the diagnostic fu
 ## Default Experimental Layout
 
 ```{=html}
-<pre>
+
      01  02  03  04  05  06  07  08  09  10  11  12
  A   B   S1  S2  S3  S4  S5  S6  S7  S8  S9  S10 B
  B   B   S1  S2  S3  S4  S5  S6  S7  S8  S9  S10 B  
@@ -275,7 +275,14 @@ For issues with specific file formats or analysis methods, use the diagnostic fu
  F   B   BL  BL  BL  BL  BL  BL  BL  BL  BL  BL  B
  G   B   BL  BL  BL  BL  BL  BL  BL  BL  BL  BL  B
  H   B   U1  U2  U3  U4  U5  U6  U7  U8  U9  U10 B
-</pre>
+
+Legend:
+- S = Sample (A=Rep1, B=Rep2, C=Rep3)
+- N = NP-only control
+- U = Untreated control
+- B = Broth control
+- BL = Blank 
+- Columns 2-11 = Concentrations 1-10
 ```
 
 ### Summaries and Diagnostics
