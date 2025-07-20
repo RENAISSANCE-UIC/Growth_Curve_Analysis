@@ -9,10 +9,10 @@ categories <- c("Blank", "Material Control (NP Only)", "Broth Only",
                 "Experiment", "Positive Control (Bacteria Only)")
 
 category_colors <- c(
-  "Experiment" = "#8a4db0",
+  "Experiment" = "#648f57",
   "Broth Only" = "#DAA520",
-  "Positive Control (Bacteria Only)" = "#c46464EE",
-  "Material Control (NP Only)" = "#4373a3EE",
+  "Positive Control (Bacteria Only)" = "#cc6694",
+  "Material Control (NP Only)" = "#2258a3",
   "Blank" = "#BEBEBE"
 )
 
@@ -527,6 +527,10 @@ ui <- fluidPage(
               
               div(class = "card",
                   h5(span(class = "card-icon", "🔬"), "Experimental Design"),
+                  # REPLACED: Native Shiny dilution direction selector
+                  selectInput("dilution_direction", "Dilution Direction:", 
+                              choices = c("Vertical" = "vertical", "Horizontal" = "horizontal"), 
+                              selected = "vertical"),
                   div(class = "config-grid",
                       div(class = "compact-input",
                           tags$label("Reps:", class = "compact-label"),
@@ -539,9 +543,10 @@ ui <- fluidPage(
                                        value = 8, min = 1, max = 10)
                       ),
                       div(class = "compact-input",
-                          tags$label("Start Col:", class = "compact-label"),
-                          numericInput("start_column", label = NULL, 
-                                       value = 2, min = 1, max = 12)
+                          # REMOVED: Fixed ID since we'll update this dynamically
+                          tags$label("Start Row:", class = "compact-label", id = "start_position_label"),
+                          numericInput("start_position", label = NULL, 
+                                       value = 1, min = 1, max = 8)
                       ),
                       div(class = "compact-input",
                           tags$label("Max Conc:", class = "compact-label"),
@@ -604,72 +609,95 @@ ui <- fluidPage(
     })
   ),
   
+  # SIMPLIFIED: JavaScript with dilution direction handling removed
   tags$script(HTML("
-    let selectedWell = null;
-    
-    // Context menu functionality
-    document.addEventListener('contextmenu', function(e) {
-      if (e.target && e.target.textContent.match(/^[A-H][0-9]{1,2}$/)) {
-        e.preventDefault();
-        selectedWell = e.target.textContent;
-        const menu = document.getElementById('contextMenu');
-        menu.style.left = e.pageX + 'px';
-        menu.style.top = e.pageY + 'px';
-        menu.style.display = 'block';
-      } else {
-        document.getElementById('contextMenu').style.display = 'none';
-      }
-    });
-    
-    document.addEventListener('click', function(e) {
+  let selectedWell = null;
+  
+  // Context menu functionality
+  document.addEventListener('contextmenu', function(e) {
+    if (e.target && e.target.textContent.match(/^[A-H][0-9]{1,2}$/)) {
+      e.preventDefault();
+      selectedWell = e.target.textContent;
       const menu = document.getElementById('contextMenu');
-      if (e.target.classList.contains('context-item')) {
-        Shiny.setInputValue('right_click_assign', {
-          well: selectedWell,
-          category: e.target.textContent,
-          nonce: Math.random()
-        });
-      }
-      menu.style.display = 'none';
+      menu.style.left = e.pageX + 'px';
+      menu.style.top = e.pageY + 'px';
+      menu.style.display = 'block';
+    } else {
+      document.getElementById('contextMenu').style.display = 'none';
+    }
+  });
+  
+  document.addEventListener('click', function(e) {
+    const menu = document.getElementById('contextMenu');
+    if (e.target.classList.contains('context-item')) {
+      Shiny.setInputValue('right_click_assign', {
+        well: selectedWell,
+        category: e.target.textContent,
+        nonce: Math.random()
+      });
+    }
+    menu.style.display = 'none';
+  });
+  
+  // Handle custom radio buttons for mode only
+  document.addEventListener('DOMContentLoaded', function() {
+    const radioInputs = document.querySelectorAll('input[name=\"mode\"]');
+    
+    radioInputs.forEach(input => {
+      input.addEventListener('change', function() {
+        if (this.checked) {
+          Shiny.setInputValue('mode', this.value);
+        }
+      });
     });
     
-    // Handle custom radio buttons
-    document.addEventListener('DOMContentLoaded', function() {
-      const radioInputs = document.querySelectorAll('input[name=\"mode\"]');
-      
-      radioInputs.forEach(input => {
-        input.addEventListener('change', function() {
-          if (this.checked) {
-            Shiny.setInputValue('mode', this.value);
-          }
-        });
-      });
-      
-      // Set initial value
-      const checkedInput = document.querySelector('input[name=\"mode\"]:checked');
-      if (checkedInput) {
-        Shiny.setInputValue('mode', checkedInput.value);
-      }
-    });
-  "))
+    // Set initial value
+    const checkedInput = document.querySelector('input[name=\"mode\"]:checked');
+    if (checkedInput) {
+      Shiny.setInputValue('mode', checkedInput.value);
+    }
+  });
+"))
 )
 
 server <- function(input, output, session) {
   # Reactive values
   well_assignments <- reactiveVal(data.frame(Well = plate_data$Well, Category = "Blank"))
   history <- reactiveVal(list())
+  mode_value <- reactiveVal("Drag")
   
-  # Add this reactive value for mode
-  mode_value <- reactiveVal("Drag")  # Default value
+  # REMOVED: dilution_direction reactive value - using input directly now
   
-  # ADD THESE: Non-reactive storage for auto-capture
+  # Add these reactive values for non-reactive storage
   latest_export_data <- NULL
   latest_well_assignments <- NULL
   
-  # Add this observer to handle mode changes
+  # Handle mode changes
   observeEvent(input$mode, {
     if (!is.null(input$mode) && input$mode != "") {
       mode_value(input$mode)
+    }
+  })
+  
+  # SIMPLIFIED: Handle dilution direction changes with native Shiny
+  observeEvent(input$dilution_direction, {
+    dims <- plate_dims()
+    
+    # Update the label text and input limits
+    if (input$dilution_direction == "horizontal") {
+      # Update for horizontal dilutions (columns)
+      session$sendCustomMessage(type = "updateLabel", 
+                                message = list(id = "start_position_label", text = "Start Col:"))
+      updateNumericInput(session, "start_position", 
+                         value = min(input$start_position %||% 2, dims$cols),
+                         min = 1, max = dims$cols)
+    } else {
+      # Update for vertical dilutions (rows)
+      session$sendCustomMessage(type = "updateLabel", 
+                                message = list(id = "start_position_label", text = "Start Row:"))
+      updateNumericInput(session, "start_position",
+                         value = min(input$start_position %||% 1, dims$rows), 
+                         min = 1, max = dims$rows)
     }
   })
   
@@ -722,6 +750,14 @@ server <- function(input, output, session) {
     pd <- current_plate_data()
     well_assignments(data.frame(Well = pd$Well, Category = "Blank"))
     history(list())
+    
+    # Update start_position limits based on new plate format
+    dims <- plate_dims()
+    if (input$dilution_direction == "horizontal") {
+      updateNumericInput(session, "start_position", max = dims$cols)
+    } else {
+      updateNumericInput(session, "start_position", max = dims$rows)
+    }
   })
   
   # Render plate data with assignments
@@ -737,150 +773,100 @@ server <- function(input, output, session) {
     pd
   })
   
-  # Create enhanced CSV export with metadata
-  enhanced_export_data <- reactive({
-    current <- well_assignments()
-    pd <- current_plate_data()
-    dims <- plate_dims()
-    
-    # Filter based on export options
-    if (!input$include_empty_wells) {
-      current <- current[current$Category != "Blank", ]
-    }
-    
-    # Create base export data
-    export_data <- current
-    
-    # Add row and column information
-    export_data$Row <- substr(export_data$Well, 1, 1)
-    export_data$Column <- as.numeric(substr(export_data$Well, 2, nchar(export_data$Well)))
-    
-    # Add replicate information
-    export_data$Replicate_Number <- NA
-    export_data$Replicate_Label <- NA
-    
-    # Add concentration information
-    export_data$Concentration_Value <- NA
-    export_data$Concentration_Units <- NA
-    
-    # Process each well
-    for (i in seq_len(nrow(export_data))) {
-      well <- export_data$Well[i]
-      category <- export_data$Category[i]
-      row_letter <- export_data$Row[i]
-      col_num <- export_data$Column[i]
-      
-      # Assign replicate information ONLY to "Experiment" category
-      if (category == "Experiment") {
-        row_index <- which(dims$row_letters == row_letter)
-        if (row_index <= length(replicate_labels()) && row_index <= input$num_replicates) {
-          export_data$Replicate_Number[i] <- row_index
-          export_data$Replicate_Label[i] <- replicate_labels()[row_index]
-        }
-      }
-      
-      # Assign concentration only to appropriate categories
-      if (category %in% concentration_categories) {
-        start_col <- input$start_column
-        end_col <- start_col + input$num_dilutions - 1
-        
-        if (col_num >= start_col && col_num <= end_col) {
-          conc_vals <- concentration_values()
-          dilution_index <- col_num - start_col + 1
-          if (dilution_index <= length(conc_vals)) {
-            export_data$Concentration_Value[i] <- conc_vals[dilution_index]
-            export_data$Concentration_Units[i] <- input$concentration_units
-          }
-        }
-      }
-    }
-    
-    # Add metadata if requested
-    if (input$include_metadata) {
-      export_data$Plate_Format <- input$plate_format
-      export_data$Dilution_Start_Column <- input$start_column
-      export_data$Number_of_Dilutions <- input$num_dilutions
-      export_data$Highest_Concentration <- input$highest_concentration
-      export_data$Export_Date <- Sys.Date()
-      export_data$Export_Time <- Sys.time()
-    }
-    
-    # Reorder columns for better readability
-    col_order <- c("Well", "Row", "Column", "Category", "Replicate_Number", 
-                   "Replicate_Label", "Concentration_Value", "Concentration_Units")
-    
-    if (input$include_metadata) {
-      col_order <- c(col_order, "Plate_Format", "Dilution_Start_Column", 
-                     "Number_of_Dilutions", "Highest_Concentration", 
-                     "Export_Date", "Export_Time")
-    }
-    
-    export_data[, col_order[col_order %in% names(export_data)]]
-  })
-  
-  # ADD THIS: Observer to update non-reactive storage whenever data changes
-  observe({
-    # Update non-reactive copies whenever reactive values change
-    latest_well_assignments <<- well_assignments()
-    
-    # Also update the enhanced export data
-    tryCatch({
-      latest_export_data <<- enhanced_export_data()
-    }, error = function(e) {
-      # If enhanced export fails, just use basic assignments
-      latest_export_data <<- well_assignments()
-    })
-  })
-  
-  # Render the enhanced plate plot
+  # SIMPLIFIED: Enhanced plate plot using native Shiny input
   output$platePlot <- renderPlotly({
     pd <- render_plate()
     dims <- plate_dims()
     
-    # Create column labels based on configuration
-    col_labels <- character(dims$cols)
-    start_col <- input$start_column
-    end_col <- start_col + input$num_dilutions - 1
+    # SIMPLIFIED: Use input directly
+    direction <- input$dilution_direction
+    req(direction)
     
-    if (end_col <= dims$cols) {
-      dilution_lbls <- dilution_labels()
-      dilution_indices <- start_col:end_col
-      col_labels[dilution_indices] <- dilution_lbls[1:length(dilution_indices)]
+    # Handle start_position with proper fallback
+    start_pos <- input$start_position %||% (if (direction == "horizontal") 2 else 1)
+    
+    # Clear labels arrays and rebuild based on direction
+    col_labels <- rep("", dims$cols)
+    row_labels <- rep("", dims$rows)
+    
+    end_pos <- start_pos + input$num_dilutions - 1
+    
+    if (direction == "horizontal") {
+      # Horizontal dilutions: concentrations in columns, replicates in rows
+      if (end_pos <= dims$cols) {
+        conc_vals <- concentration_values()
+        dilution_indices <- start_pos:end_pos
+        valid_indices <- dilution_indices[dilution_indices <= dims$cols]
+        if (length(valid_indices) > 0) {
+          col_labels[valid_indices] <- as.character(conc_vals[1:length(valid_indices)])
+        }
+      }
+      
+      # Row labels for replicates
+      for (i in seq_along(dims$row_letters)) {
+        if (i <= input$num_replicates && i <= length(replicate_labels())) {
+          row_labels[i] <- replicate_labels()[i]
+        }
+      }
+    } else {
+      # Vertical dilutions: concentrations in rows, replicates in columns
+      if (end_pos <= dims$rows) {
+        conc_vals <- concentration_values()
+        dilution_indices <- start_pos:end_pos
+        for (i in seq_along(dilution_indices)) {
+          row_idx <- dilution_indices[i]
+          if (row_idx <= length(row_labels) && i <= length(conc_vals)) {
+            row_labels[row_idx] <- as.character(conc_vals[i])
+          }
+        }
+      }
+      
+      # Column labels for replicates
+      for (j in 1:dims$cols) {
+        if (j <= input$num_replicates && j <= length(replicate_labels())) {
+          col_labels[j] <- replicate_labels()[j]
+        }
+      }
     }
     
     # Create annotations for row and column labels
     annotations <- list()
     
-    # Row labels (replicates)
+    # Row labels
     for (i in seq_along(dims$row_letters)) {
-      row_label <- ""
-      if (i <= input$num_replicates && i <= length(replicate_labels())) {
-        row_label <- replicate_labels()[i]
+      label_text <- row_labels[i]
+      if (!is.null(label_text) && label_text != "" && !is.na(label_text)) {
+        annotations[[length(annotations) + 1]] <- list(
+          x = 0.6, 
+          y = dims$row_letters[i],
+          text = label_text,
+          xref = "x", yref = "y",
+          showarrow = FALSE,
+          xanchor = "right",
+          font = list(size = 12, color = "#475569", family = "Inter", weight = "bold")
+        )
       }
-      annotations[[length(annotations) + 1]] <- list(
-        x = 0.6, y = dims$row_letters[i],
-        text = row_label,
-        xref = "x", yref = "y",
-        showarrow = FALSE,
-        xanchor = "right",
-        font = list(size = 12, color = "#475569", family = "Inter")
-      )
     }
     
-    # Column labels (concentrations)
+    # Column labels
     for (j in 1:dims$cols) {
-      annotations[[length(annotations) + 1]] <- list(
-        x = j, y = -0.5,
-        text = col_labels[j],
-        xref = "x", yref = "y",
-        showarrow = FALSE,
-        yanchor = "bottom",
-        textangle = -90,
-        font = list(size = 10, color = "#64748b", family = "Inter")
-      )
+      label_text <- col_labels[j]
+      if (!is.null(label_text) && label_text != "" && !is.na(label_text)) {
+        annotations[[length(annotations) + 1]] <- list(
+          x = j, 
+          y = -0.5,
+          text = label_text,
+          xref = "x", yref = "y",
+          showarrow = FALSE,
+          yanchor = "bottom",
+          textangle = if (direction == "horizontal") -90 else 0,
+          font = list(size = 10, color = "#64748b", family = "Inter", weight = "bold")
+        )
+      }
     }
     
-    plot_ly(
+    # Create the plot
+    p <- plot_ly(
       data = pd,
       x = ~Col,
       y = ~Row,
@@ -917,12 +903,12 @@ server <- function(input, output, session) {
           showgrid = FALSE,
           zeroline = FALSE
         ),
-        # Use mode_value() instead of input$mode
         dragmode = if (mode_value() == "Drag") "select" else FALSE,
         annotations = annotations,
         title = list(
           text = paste0("<b>", input$plate_format, "-Well Plate Layout</b><br>",
-                        "<span style='font-size:14px;color:#64748b;'>Start Col: ", input$start_column, 
+                        "<span style='font-size:14px;color:#64748b;'>Direction: ", 
+                        tools::toTitleCase(direction), " | Start Pos: ", start_pos, 
                         " | Dilutions: ", input$num_dilutions, 
                         " | Replicates: ", input$num_replicates, "</span>"),
           font = list(size = 18, color = "#1e293b", family = "Inter")
@@ -937,6 +923,13 @@ server <- function(input, output, session) {
         displayModeBar = FALSE,
         responsive = TRUE
       )
+    
+    # Register events properly
+    p <- p %>%
+      event_register('plotly_click') %>%
+      event_register('plotly_selected')
+    
+    return(p)
   })
   
   # Enhanced assignment summary table
@@ -955,9 +948,128 @@ server <- function(input, output, session) {
     summary_data
   }, striped = TRUE, hover = TRUE, bordered = TRUE)
   
-  # Event handlers - Modified to use mode_value()
+  # Create enhanced CSV export with metadata (supports both directions)
+  enhanced_export_data <- reactive({
+    current <- well_assignments()
+    pd <- current_plate_data()
+    dims <- plate_dims()
+    
+    # Filter based on export options
+    if (!input$include_empty_wells) {
+      current <- current[current$Category != "Blank", ]
+    }
+    
+    # Create base export data
+    export_data <- current
+    
+    # Add row and column information
+    export_data$Row <- substr(export_data$Well, 1, 1)
+    export_data$Column <- as.numeric(substr(export_data$Well, 2, nchar(export_data$Well)))
+    
+    # Add replicate information
+    export_data$Replicate_Number <- NA
+    export_data$Replicate_Label <- NA
+    
+    # Add concentration information
+    export_data$Concentration_Value <- NA
+    export_data$Concentration_Units <- NA
+    
+    # Handle direction - SIMPLIFIED to use input directly
+    direction <- input$dilution_direction
+    start_pos <- input$start_position %||% (if (direction == "horizontal") 2 else 1)
+    
+    # Process each well
+    for (i in seq_len(nrow(export_data))) {
+      well <- export_data$Well[i]
+      category <- export_data$Category[i]
+      row_letter <- export_data$Row[i]
+      col_num <- export_data$Column[i]
+      
+      # Assign replicate information based on dilution direction
+      if (category == "Experiment") {
+        if (direction == "horizontal") {
+          # Horizontal: replicates are in rows
+          row_index <- which(dims$row_letters == row_letter)
+          if (row_index <= length(replicate_labels()) && row_index <= input$num_replicates) {
+            export_data$Replicate_Number[i] <- row_index
+            export_data$Replicate_Label[i] <- replicate_labels()[row_index]
+          }
+        } else {
+          # Vertical: replicates are in columns
+          if (col_num <= length(replicate_labels()) && col_num <= input$num_replicates) {
+            export_data$Replicate_Number[i] <- col_num
+            export_data$Replicate_Label[i] <- replicate_labels()[col_num]
+          }
+        }
+      }
+      
+      # Assign concentration based on direction
+      if (category %in% concentration_categories) {
+        end_pos <- start_pos + input$num_dilutions - 1
+        
+        if (direction == "horizontal") {
+          # Horizontal dilutions: concentrations across columns
+          if (col_num >= start_pos && col_num <= end_pos) {
+            conc_vals <- concentration_values()
+            dilution_index <- col_num - start_pos + 1
+            if (dilution_index <= length(conc_vals)) {
+              export_data$Concentration_Value[i] <- conc_vals[dilution_index]
+              export_data$Concentration_Units[i] <- input$concentration_units
+            }
+          }
+        } else {
+          # Vertical dilutions: concentrations down rows
+          row_index <- which(dims$row_letters == row_letter)
+          if (row_index >= start_pos && row_index <= end_pos) {
+            conc_vals <- concentration_values()
+            dilution_index <- row_index - start_pos + 1
+            if (dilution_index <= length(conc_vals)) {
+              export_data$Concentration_Value[i] <- conc_vals[dilution_index]
+              export_data$Concentration_Units[i] <- input$concentration_units
+            }
+          }
+        }
+      }
+    }
+    
+    # Add metadata if requested
+    if (input$include_metadata) {
+      export_data$Plate_Format <- input$plate_format
+      export_data$Dilution_Direction <- direction
+      export_data$Dilution_Start_Position <- start_pos
+      export_data$Number_of_Dilutions <- input$num_dilutions
+      export_data$Highest_Concentration <- input$highest_concentration
+      export_data$Export_Date <- Sys.Date()
+      export_data$Export_Time <- Sys.time()
+    }
+    
+    # Reorder columns for better readability
+    col_order <- c("Well", "Row", "Column", "Category", "Replicate_Number", 
+                   "Replicate_Label", "Concentration_Value", "Concentration_Units")
+    
+    if (input$include_metadata) {
+      col_order <- c(col_order, "Plate_Format", "Dilution_Direction", 
+                     "Dilution_Start_Position", "Number_of_Dilutions", 
+                     "Highest_Concentration", "Export_Date", "Export_Time")
+    }
+    
+    export_data[, col_order[col_order %in% names(export_data)]]
+  })
+  
+  # Observer to update non-reactive storage whenever data changes
+  observe({
+    latest_well_assignments <<- well_assignments()
+    
+    tryCatch({
+      latest_export_data <<- enhanced_export_data()
+    }, error = function(e) {
+      latest_export_data <<- well_assignments()
+    })
+  })
+  
+  # Event handlers
   observeEvent(event_data("plotly_click", source = "plate"), {
-    req(mode_value() == "Click")  # Changed from input$mode
+    req(mode_value() == "Click")
     click <- event_data("plotly_click", source = "plate")
     pd <- current_plate_data()
     well_clicked <- pd$Well[click$pointNumber + 1]
@@ -969,7 +1081,7 @@ server <- function(input, output, session) {
   })
   
   observeEvent(event_data("plotly_selected", source = "plate"), {
-    req(mode_value() == "Drag")  # Changed from input$mode
+    req(mode_value() == "Drag")
     selected <- event_data("plotly_selected", source = "plate")
     pd <- current_plate_data()
     wells <- pd$Well[selected$pointNumber + 1]
@@ -1012,7 +1124,6 @@ server <- function(input, output, session) {
   # Update filename when plate format changes
   observeEvent(input$plate_format, {
     current_filename <- input$filename
-    # Only update if it's still the default format or empty
     if (is.null(current_filename) || current_filename == "" || 
         grepl("^plate_layout_\\d+well_", current_filename)) {
       new_filename <- paste0("plate_layout_", input$plate_format, "well_", Sys.Date())
@@ -1023,16 +1134,12 @@ server <- function(input, output, session) {
   # Enhanced CSV download
   output$downloadCSV <- downloadHandler(
     filename = function() {
-      # Get user input, fallback to default if empty
       user_filename <- input$filename
       if (is.null(user_filename) || user_filename == "") {
         user_filename <- paste0("plate_layout_", input$plate_format, "well_", Sys.Date())
       }
       
-      # Clean filename (remove any .csv extension if user added it)
       user_filename <- gsub("\\.csv$", "", user_filename)
-      
-      # Add .csv extension
       paste0(user_filename, ".csv")
     },
     content = function(file) {
@@ -1040,22 +1147,16 @@ server <- function(input, output, session) {
     }
   )
   
-  # === AUTO-CAPTURE FUNCTIONALITY (UPDATED) ===
-  
-  # Auto-capture on app close
+  # Auto-capture functionality (if enabled)
   if (Sys.getenv("PLATE_CAPTURE_ENABLED") == "TRUE") {
-    
-    # Add onStop callback to capture data when app closes
     onStop(function() {
       capture_file <- Sys.getenv("PLATE_CAPTURE_FILE")
       
       if (capture_file != "") {
         tryCatch({
-          # Use the non-reactive stored data
           final_data <- latest_export_data
           
           if (!is.null(final_data) && nrow(final_data) > 0) {
-            # Use base R write.csv as fallback if readr not available
             if (require(readr, quietly = TRUE)) {
               write_csv(final_data, capture_file)
             } else {
@@ -1069,7 +1170,6 @@ server <- function(input, output, session) {
         }, error = function(e) {
           cat("❌ Error auto-saving layout:", e$message, "\n")
           
-          # Try to save basic well assignments as fallback
           tryCatch({
             basic_data <- latest_well_assignments
             if (!is.null(basic_data) && nrow(basic_data) > 0) {
@@ -1084,12 +1184,9 @@ server <- function(input, output, session) {
       
       cat("🔄 Stopping app...\n")
       try(stopApp(), silent = TRUE)      
-      
     })
   }
-  
 }
-
 
 if (!exists("SOURCED_FROM_FUNCTION")) {
   shinyApp(ui, server)
