@@ -58,13 +58,16 @@ ui <- fluidPage(
         overflow: hidden;
       }
       
-      .navbar {
-        background: linear-gradient(135deg, #8a8787 0%, #764ba2 100%);
-        padding: 6px 10px;
-        color: white;
-        margin: 0;
-        border-radius: 0;
-      }
+    .navbar {
+      background: linear-gradient(135deg, #8a8787 0%, #764ba2 100%);
+      padding: 6px 10px;
+      color: white;
+      margin: 0;
+      border-radius: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
       
       .navbar h1 {
         margin: 0;
@@ -80,6 +83,11 @@ ui <- fluidPage(
         font-weight: 400;
         opacity: 0.9;
         line-height: 1.1;
+      }
+      
+      .navbar-left {
+        display: flex;
+        flex-direction: column;
       }
       
       .content-wrapper {
@@ -212,6 +220,27 @@ ui <- fluidPage(
       .btn-success:hover {
         background: #059496;
         transform: translateY(-1px);
+      }
+      
+      .btn-stop-save {
+        background: #551646;
+        color: white;
+        border: none;
+        padding: 8px 16px;
+        border-radius: 6px;
+        font-weight: 500;
+        font-size: 14px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+ 
+      .btn-stop-save:hover {
+        background: #b91c1c;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
       }
       
      .selection-mode-container {
@@ -495,8 +524,11 @@ ui <- fluidPage(
   
   div(class = "main-container",
       div(class = "navbar",
-          h1("🧪 Flexible 96-Well Plate Designer"),
-          p(class = "subtitle", "Configurable plate layout editor for experimental design")
+          div(class = "navbar-left",
+              h1("🧪 Flexible 96-Well Plate Designer"),
+              p(class = "subtitle", "Configurable plate layout editor for experimental design")
+          ),
+          actionButton("stopAndSave", "⏹️ Stop & Save", class = "btn-stop-save")
       ),
       
       div(class = "content-wrapper",
@@ -613,6 +645,14 @@ ui <- fluidPage(
   tags$script(HTML("
   let selectedWell = null;
   
+  // Add this message handler for updating labels
+  Shiny.addCustomMessageHandler('updateLabel', function(message) {
+    const element = document.getElementById(message.id);
+    if (element) {
+      element.textContent = message.text;
+    }
+  });
+  
   // Context menu functionality
   document.addEventListener('contextmenu', function(e) {
     if (e.target && e.target.textContent.match(/^[A-H][0-9]{1,2}$/)) {
@@ -666,8 +706,6 @@ server <- function(input, output, session) {
   history <- reactiveVal(list())
   mode_value <- reactiveVal("Drag")
   
-  # REMOVED: dilution_direction reactive value - using input directly now
-  
   # Add these reactive values for non-reactive storage
   latest_export_data <- NULL
   latest_well_assignments <- NULL
@@ -679,20 +717,70 @@ server <- function(input, output, session) {
     }
   })
   
-  # SIMPLIFIED: Handle dilution direction changes with native Shiny
+  # Stop & Save button handler
+  observeEvent(input$stopAndSave, {
+    # Create a temporary file for saving
+    temp_file <- paste0("plate_layout_final_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv")
+    
+    tryCatch({
+      # Get the current export data
+      export_data <- enhanced_export_data()
+      
+      if (!is.null(export_data) && nrow(export_data) > 0) {
+        # Save to the current working directory
+        write.csv(export_data, temp_file, row.names = FALSE, na = "")
+        
+        showModal(modalDialog(
+          title = "Layout Saved Successfully",
+          paste("Your plate layout has been saved to:", temp_file),
+          footer = tagList(
+            actionButton("confirmStop", "OK", class = "btn btn-primary")
+          )
+        ))
+      } else {
+        showModal(modalDialog(
+          title = "No Data to Save",
+          "No plate layout data to save. The app will close without saving.",
+          footer = tagList(
+            actionButton("confirmStop", "OK", class = "btn btn-primary")
+          )
+        ))
+      }
+    }, error = function(e) {
+      showModal(modalDialog(
+        title = "Error Saving",
+        paste("Error saving layout:", e$message),
+        footer = tagList(
+          actionButton("cancelStop", "Cancel", class = "btn btn-secondary"),
+          actionButton("confirmStop", "Close Anyway", class = "btn btn-danger")
+        )
+      ))
+    })
+  })
+  
+  # Handle modal confirmation
+  observeEvent(input$confirmStop, {
+    removeModal()
+    stopApp()
+  })
+  
+  observeEvent(input$cancelStop, {
+    removeModal()
+  })
+  
+  # CORRECTED: Handle dilution direction changes
   observeEvent(input$dilution_direction, {
     dims <- plate_dims()
     
-    # Update the label text and input limits
-    if (input$dilution_direction == "horizontal") {
-      # Update for horizontal dilutions (columns)
+    if (input$dilution_direction == "vertical") {
+      # Vertical: replicates go across columns, so start position is column
       session$sendCustomMessage(type = "updateLabel", 
                                 message = list(id = "start_position_label", text = "Start Col:"))
       updateNumericInput(session, "start_position", 
-                         value = min(input$start_position %||% 2, dims$cols),
+                         value = min(input$start_position %||% 1, dims$cols),
                          min = 1, max = dims$cols)
     } else {
-      # Update for vertical dilutions (rows)
+      # Horizontal: replicates go down rows, so start position is row
       session$sendCustomMessage(type = "updateLabel", 
                                 message = list(id = "start_position_label", text = "Start Row:"))
       updateNumericInput(session, "start_position",
@@ -751,9 +839,9 @@ server <- function(input, output, session) {
     well_assignments(data.frame(Well = pd$Well, Category = "Blank"))
     history(list())
     
-    # Update start_position limits based on new plate format
+    # Update start_position limits based on new plate format and current direction
     dims <- plate_dims()
-    if (input$dilution_direction == "horizontal") {
+    if (input$dilution_direction == "vertical") {
       updateNumericInput(session, "start_position", max = dims$cols)
     } else {
       updateNumericInput(session, "start_position", max = dims$rows)
@@ -773,58 +861,58 @@ server <- function(input, output, session) {
     pd
   })
   
-  # SIMPLIFIED: Enhanced plate plot using native Shiny input
+  # CORRECTED: Enhanced plate plot with fixed logic
   output$platePlot <- renderPlotly({
     pd <- render_plate()
     dims <- plate_dims()
     
-    # SIMPLIFIED: Use input directly
     direction <- input$dilution_direction
     req(direction)
     
     # Handle start_position with proper fallback
-    start_pos <- input$start_position %||% (if (direction == "horizontal") 2 else 1)
+    start_pos <- input$start_position %||% 1
     
     # Clear labels arrays and rebuild based on direction
     col_labels <- rep("", dims$cols)
     row_labels <- rep("", dims$rows)
     
-    end_pos <- start_pos + input$num_dilutions - 1
-    
-    if (direction == "horizontal") {
-      # Horizontal dilutions: concentrations in columns, replicates in rows
-      if (end_pos <= dims$cols) {
-        conc_vals <- concentration_values()
-        dilution_indices <- start_pos:end_pos
-        valid_indices <- dilution_indices[dilution_indices <= dims$cols]
-        if (length(valid_indices) > 0) {
-          col_labels[valid_indices] <- as.character(conc_vals[1:length(valid_indices)])
-        }
+    if (direction == "vertical") {
+      # Vertical: concentrations down rows, replicates across columns
+      # Concentrations always start at row 1
+      conc_vals <- concentration_values()
+      for (i in 1:min(input$num_dilutions, length(conc_vals), dims$rows)) {
+        row_labels[i] <- as.character(conc_vals[i])
       }
       
-      # Row labels for replicates
-      for (i in seq_along(dims$row_letters)) {
-        if (i <= input$num_replicates && i <= length(replicate_labels())) {
-          row_labels[i] <- replicate_labels()[i]
-        }
-      }
-    } else {
-      # Vertical dilutions: concentrations in rows, replicates in columns
-      if (end_pos <= dims$rows) {
-        conc_vals <- concentration_values()
-        dilution_indices <- start_pos:end_pos
-        for (i in seq_along(dilution_indices)) {
-          row_idx <- dilution_indices[i]
-          if (row_idx <= length(row_labels) && i <= length(conc_vals)) {
-            row_labels[row_idx] <- as.character(conc_vals[i])
+      # Replicates start at start_pos column
+      rep_labels <- replicate_labels()
+      end_col <- start_pos + input$num_replicates - 1
+      if (end_col <= dims$cols) {
+        for (i in 1:input$num_replicates) {
+          col_idx <- start_pos + i - 1
+          if (col_idx <= dims$cols && i <= length(rep_labels)) {
+            col_labels[col_idx] <- rep_labels[i]
           }
         }
       }
       
-      # Column labels for replicates
-      for (j in 1:dims$cols) {
-        if (j <= input$num_replicates && j <= length(replicate_labels())) {
-          col_labels[j] <- replicate_labels()[j]
+    } else {
+      # Horizontal: concentrations across columns, replicates down rows
+      # Concentrations always start at column 1
+      conc_vals <- concentration_values()
+      for (i in 1:min(input$num_dilutions, length(conc_vals), dims$cols)) {
+        col_labels[i] <- as.character(conc_vals[i])
+      }
+      
+      # Replicates start at start_pos row
+      rep_labels <- replicate_labels()
+      end_row <- start_pos + input$num_replicates - 1
+      if (end_row <= dims$rows) {
+        for (i in 1:input$num_replicates) {
+          row_idx <- start_pos + i - 1
+          if (row_idx <= dims$rows && i <= length(rep_labels)) {
+            row_labels[row_idx] <- rep_labels[i]
+          }
         }
       }
     }
@@ -948,7 +1036,7 @@ server <- function(input, output, session) {
     summary_data
   }, striped = TRUE, hover = TRUE, bordered = TRUE)
   
-  # Create enhanced CSV export with metadata (supports both directions)
+  # CORRECTED: Create enhanced CSV export with fixed replicate assignment
   enhanced_export_data <- reactive({
     current <- well_assignments()
     pd <- current_plate_data()
@@ -974,9 +1062,9 @@ server <- function(input, output, session) {
     export_data$Concentration_Value <- NA
     export_data$Concentration_Units <- NA
     
-    # Handle direction - SIMPLIFIED to use input directly
+    # Handle direction
     direction <- input$dilution_direction
-    start_pos <- input$start_position %||% (if (direction == "horizontal") 2 else 1)
+    start_pos <- input$start_position %||% 1
     
     # Process each well
     for (i in seq_len(nrow(export_data))) {
@@ -987,44 +1075,46 @@ server <- function(input, output, session) {
       
       # Assign replicate information based on dilution direction
       if (category == "Experiment") {
-        if (direction == "horizontal") {
-          # Horizontal: replicates are in rows
-          row_index <- which(dims$row_letters == row_letter)
-          if (row_index <= length(replicate_labels()) && row_index <= input$num_replicates) {
-            export_data$Replicate_Number[i] <- row_index
-            export_data$Replicate_Label[i] <- replicate_labels()[row_index]
+        if (direction == "vertical") {
+          # Vertical: replicates are in columns starting from start_pos
+          if (col_num >= start_pos && col_num < start_pos + input$num_replicates) {
+            rep_index <- col_num - start_pos + 1
+            if (rep_index <= length(replicate_labels())) {
+              export_data$Replicate_Number[i] <- rep_index
+              export_data$Replicate_Label[i] <- replicate_labels()[rep_index]
+            }
           }
         } else {
-          # Vertical: replicates are in columns
-          if (col_num <= length(replicate_labels()) && col_num <= input$num_replicates) {
-            export_data$Replicate_Number[i] <- col_num
-            export_data$Replicate_Label[i] <- replicate_labels()[col_num]
+          # Horizontal: replicates are in rows starting from start_pos
+          row_index <- which(dims$row_letters == row_letter)
+          if (row_index >= start_pos && row_index < start_pos + input$num_replicates) {
+            rep_index <- row_index - start_pos + 1
+            if (rep_index <= length(replicate_labels())) {
+              export_data$Replicate_Number[i] <- rep_index
+              export_data$Replicate_Label[i] <- replicate_labels()[rep_index]
+            }
           }
         }
       }
       
       # Assign concentration based on direction
       if (category %in% concentration_categories) {
-        end_pos <- start_pos + input$num_dilutions - 1
-        
-        if (direction == "horizontal") {
-          # Horizontal dilutions: concentrations across columns
-          if (col_num >= start_pos && col_num <= end_pos) {
+        if (direction == "vertical") {
+          # Vertical dilutions: concentrations always start at row 1
+          row_index <- which(dims$row_letters == row_letter)
+          if (row_index <= input$num_dilutions) {
             conc_vals <- concentration_values()
-            dilution_index <- col_num - start_pos + 1
-            if (dilution_index <= length(conc_vals)) {
-              export_data$Concentration_Value[i] <- conc_vals[dilution_index]
+            if (row_index <= length(conc_vals)) {
+              export_data$Concentration_Value[i] <- conc_vals[row_index]
               export_data$Concentration_Units[i] <- input$concentration_units
             }
           }
         } else {
-          # Vertical dilutions: concentrations down rows
-          row_index <- which(dims$row_letters == row_letter)
-          if (row_index >= start_pos && row_index <= end_pos) {
+          # Horizontal dilutions: concentrations always start at column 1
+          if (col_num <= input$num_dilutions) {
             conc_vals <- concentration_values()
-            dilution_index <- row_index - start_pos + 1
-            if (dilution_index <= length(conc_vals)) {
-              export_data$Concentration_Value[i] <- conc_vals[dilution_index]
+            if (col_num <= length(conc_vals)) {
+              export_data$Concentration_Value[i] <- conc_vals[col_num]
               export_data$Concentration_Units[i] <- input$concentration_units
             }
           }
@@ -1036,8 +1126,9 @@ server <- function(input, output, session) {
     if (input$include_metadata) {
       export_data$Plate_Format <- input$plate_format
       export_data$Dilution_Direction <- direction
-      export_data$Dilution_Start_Position <- start_pos
+      export_data$Replicate_Start_Position <- start_pos
       export_data$Number_of_Dilutions <- input$num_dilutions
+      export_data$Number_of_Replicates <- input$num_replicates
       export_data$Highest_Concentration <- input$highest_concentration
       export_data$Export_Date <- Sys.Date()
       export_data$Export_Time <- Sys.time()
@@ -1049,8 +1140,9 @@ server <- function(input, output, session) {
     
     if (input$include_metadata) {
       col_order <- c(col_order, "Plate_Format", "Dilution_Direction", 
-                     "Dilution_Start_Position", "Number_of_Dilutions", 
-                     "Highest_Concentration", "Export_Date", "Export_Time")
+                     "Replicate_Start_Position", "Number_of_Dilutions", 
+                     "Number_of_Replicates", "Highest_Concentration", 
+                     "Export_Date", "Export_Time")
     }
     
     export_data[, col_order[col_order %in% names(export_data)]]
@@ -1187,6 +1279,8 @@ server <- function(input, output, session) {
     })
   }
 }
+
+# shinyApp(ui, server)
 
 if (!exists("SOURCED_FROM_FUNCTION")) {
   shinyApp(ui, server)
