@@ -5,13 +5,17 @@ library(shinydashboard)
 library(shinyWidgets)
 
 # Define categories and colors with better color palette
+# Update categories to include Half Broth
 categories <- c("Blank", "Material Control (NP Only)", "Broth Only", 
-                "Experiment", "Positive Control (Bacteria Only)")
+                "Half Broth", "Experiment", 
+                "Positive Control (Untreated Bacteria)")
 
+# Add Half Broth to the color mapping
 category_colors <- c(
   "Experiment" = "#648f57",
   "Broth Only" = "#DAA520",
-  "Positive Control (Bacteria Only)" = "#cc6694",
+  "Half Broth" = "#f2d283",  # Orange color for Half Broth
+  "Positive Control (Untreated Bacteria)" = "#cc6694",
   "Material Control (NP Only)" = "#2258a3",
   "Blank" = "#BEBEBE"
 )
