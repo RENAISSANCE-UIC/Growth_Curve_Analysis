@@ -721,47 +721,6 @@ server <- function(input, output, session) {
     }
   })
   
-  # Stop & Save button handler
-  observeEvent(input$stopAndSave, {
-    # Create a temporary file for saving
-    temp_file <- paste0("plate_layout_final_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv")
-    
-    tryCatch({
-      # Get the current export data
-      export_data <- enhanced_export_data()
-      
-      if (!is.null(export_data) && nrow(export_data) > 0) {
-        # Save to the current working directory
-        write.csv(export_data, temp_file, row.names = FALSE, na = "")
-        
-        showModal(modalDialog(
-          title = "Layout Saved Successfully",
-          paste("Your plate layout has been saved to:", temp_file),
-          footer = tagList(
-            actionButton("confirmStop", "OK", class = "btn btn-primary")
-          )
-        ))
-      } else {
-        showModal(modalDialog(
-          title = "No Data to Save",
-          "No plate layout data to save. The app will close without saving.",
-          footer = tagList(
-            actionButton("confirmStop", "OK", class = "btn btn-primary")
-          )
-        ))
-      }
-    }, error = function(e) {
-      showModal(modalDialog(
-        title = "Error Saving",
-        paste("Error saving layout:", e$message),
-        footer = tagList(
-          actionButton("cancelStop", "Cancel", class = "btn btn-secondary"),
-          actionButton("confirmStop", "Close Anyway", class = "btn btn-danger")
-        )
-      ))
-    })
-  })
-  
   # Handle modal confirmation
   observeEvent(input$confirmStop, {
     removeModal()
@@ -1227,6 +1186,75 @@ server <- function(input, output, session) {
     }
   })
   
+  # Stop & Save button handler
+  observeEvent(input$stopAndSave, {
+    cat("🛑 Stop & Save button clicked\n")
+    
+    # Get the result and signal files from environment
+    result_file <- Sys.getenv("PLATE_RESULT_FILE")
+    signal_file <- Sys.getenv("PLATE_SIGNAL_FILE")
+    capture_file <- Sys.getenv("PLATE_CAPTURE_FILE")
+    
+    tryCatch({
+      # Get the current export data
+      final_data <- enhanced_export_data()
+      
+      if (!is.null(final_data) && nrow(final_data) > 0) {
+        # Save to capture file (CSV)
+        if (capture_file != "" && file.exists(dirname(capture_file))) {
+          if (require(readr, quietly = TRUE)) {
+            write_csv(final_data, capture_file)
+          } else {
+            write.csv(final_data, capture_file, row.names = FALSE, na = "")
+          }
+          cat("📋 Layout saved to:", capture_file, "\n")
+        }
+        
+        # Save to result file (RDS) for function return
+        if (result_file != "") {
+          saveRDS(final_data, result_file)
+          cat("📦 Result saved for function return\n")
+        }
+      } else {
+        cat("⚠️ No layout data to save\n")
+        if (result_file != "") {
+          saveRDS(NULL, result_file)
+        }
+      }
+      
+      # Create signal file to indicate completion
+      if (signal_file != "") {
+        writeLines("complete", signal_file)
+        cat("📡 Completion signal sent\n")
+      }
+      
+      # Show confirmation modal before stopping
+      showModal(modalDialog(
+        title = "Data Saved Successfully",
+        "Your plate layout has been saved. The app will now close.",
+        footer = tagList(
+          actionButton("confirmStopAndSave", "OK", class = "btn btn-primary")
+        )
+      ))
+      
+    }, error = function(e) {
+      cat("❌ Error saving layout:", e$message, "\n")
+      showModal(modalDialog(
+        title = "Error Saving Data",
+        paste("There was an error saving your data:", e$message),
+        footer = tagList(
+          actionButton("cancelStop", "OK", class = "btn btn-danger")
+        )
+      ))
+    })
+  })
+  
+  # Handle confirmation after Stop & Save
+  observeEvent(input$confirmStopAndSave, {
+    removeModal()
+    stopApp()
+  })
+  
   # Enhanced CSV download
   output$downloadCSV <- downloadHandler(
     filename = function() {
@@ -1247,39 +1275,64 @@ server <- function(input, output, session) {
   if (Sys.getenv("PLATE_CAPTURE_ENABLED") == "TRUE") {
     onStop(function() {
       capture_file <- Sys.getenv("PLATE_CAPTURE_FILE")
+      result_file <- Sys.getenv("PLATE_RESULT_FILE")
+      signal_file <- Sys.getenv("PLATE_SIGNAL_FILE")
       
-      if (capture_file != "") {
+      # Only save if signal file doesn't exist (meaning Stop & Save wasn't used)
+      if (signal_file != "" && !file.exists(signal_file)) {
+        cat("🔄 App stopping, saving data...\n")
+        
         tryCatch({
-          final_data <- latest_export_data
+          # Try to get the latest export data
+          final_data <- if (exists("latest_export_data") && !is.null(latest_export_data)) {
+            latest_export_data
+          } else {
+            # Fallback to basic well assignments
+            well_assignments()
+          }
           
           if (!is.null(final_data) && nrow(final_data) > 0) {
-            if (require(readr, quietly = TRUE)) {
-              write_csv(final_data, capture_file)
-            } else {
-              write.csv(final_data, capture_file, row.names = FALSE, na = "")
+            # Save to capture file (CSV)
+            if (capture_file != "" && file.exists(dirname(capture_file))) {
+              if (require(readr, quietly = TRUE)) {
+                write_csv(final_data, capture_file)
+              } else {
+                write.csv(final_data, capture_file, row.names = FALSE, na = "")
+              }
+              cat("📋 Layout auto-saved to:", capture_file, "\n")
             }
-            cat("📋 Layout auto-saved to:", capture_file, "\n")
+            
+            # Save to result file (RDS) for function return
+            if (result_file != "") {
+              saveRDS(final_data, result_file)
+              cat("📦 Result saved for function return\n")
+            }
           } else {
             cat("⚠️ No layout data to save\n")
+            if (result_file != "") {
+              saveRDS(NULL, result_file)
+              cat("📦 NULL result saved (no layout created)\n")
+            }
+          }
+          
+          # Create signal file to indicate completion
+          if (signal_file != "") {
+            writeLines("complete", signal_file)
+            cat("📡 Completion signal sent\n")
           }
           
         }, error = function(e) {
           cat("❌ Error auto-saving layout:", e$message, "\n")
-          
-          tryCatch({
-            basic_data <- latest_well_assignments
-            if (!is.null(basic_data) && nrow(basic_data) > 0) {
-              write.csv(basic_data, capture_file, row.names = FALSE)
-              cat("📋 Basic layout saved as fallback\n")
-            }
-          }, error = function(e2) {
-            cat("❌ Fallback save also failed:", e2$message, "\n")
-          })
+          if (result_file != "") {
+            saveRDS(NULL, result_file)
+          }
+          if (signal_file != "") {
+            writeLines("complete", signal_file)
+          }
         })
+        
+        cat("🔄 Data saving complete\n")
       }
-      
-      cat("🔄 Stopping app...\n")
-      try(stopApp(), silent = TRUE)      
     })
   }
 }
