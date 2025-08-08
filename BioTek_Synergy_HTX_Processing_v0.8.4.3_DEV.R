@@ -7188,7 +7188,7 @@ check_replicate_structure <- function(results) {
 #' @export
 get_colleague_format <- function(results, include_untreated = TRUE, 
                                  export_to_csv = FALSE, wavelength = NULL,
-                                 validate_inputs = TRUE) {  # ADD VALIDATION FLAG
+                                 validate_inputs = TRUE) {
   
   if (validate_inputs) {
     # Validate main inputs
@@ -7224,7 +7224,7 @@ get_colleague_format <- function(results, include_untreated = TRUE,
     } else if (wavelength == "all") {
       cat("• Exporting all wavelengths\n")
       
-      # Export each wavelength separately with better error handling
+      # Export each wavelength separately
       all_results <- list()
       
       for (i in seq_along(wavelength_keys)) {
@@ -7235,13 +7235,18 @@ get_colleague_format <- function(results, include_untreated = TRUE,
         
         tryCatch({
           single_result <- results[[wl_key]]
-          wl_data <- export_wide_format(single_result, data_type = "corrected", 
+          
+          # IMPORTANT: Adapt the single wavelength result to standard format
+          adapted_result <- adapt_single_wavelength_for_accessors(single_result)
+          
+          # Now export using the adapted result
+          wl_data <- export_wide_format(adapted_result, data_type = "corrected", 
                                         sample_types = "sample")
           
           all_results[[paste0("samples_", wl, "nm")]] <- wl_data
           
           if (include_untreated) {
-            untreated_data <- export_wide_format(single_result, data_type = "corrected", 
+            untreated_data <- export_wide_format(adapted_result, data_type = "corrected", 
                                                  sample_types = "untreated_control")
             all_results[[paste0("untreated_", wl, "nm")]] <- untreated_data
           }
@@ -7268,7 +7273,7 @@ get_colleague_format <- function(results, include_untreated = TRUE,
       return(all_results)
       
     } else {
-      # Specific wavelength requested with validation
+      # Specific wavelength requested
       wavelength_key <- paste0("wavelength_", wavelength)
       
       if (!wavelength_key %in% names(results)) {
@@ -7278,18 +7283,20 @@ get_colleague_format <- function(results, include_untreated = TRUE,
       
       cat("• Exporting", wavelength, "nm data\n")
       
-      # Use the single wavelength with error handling
-      tryCatch({
-        single_result <- results[[wavelength_key]]
-        colleague_data <- get_colleague_format_single(single_result, include_untreated, export_to_csv, wavelength)
-        return(colleague_data)
-      }, error = function(e) {
-        stop("Error processing wavelength ", wavelength, ": ", e$message)
-      })
+      # Get the single wavelength result
+      single_result <- results[[wavelength_key]]
+      
+      # IMPORTANT: Adapt it to standard format
+      adapted_result <- adapt_single_wavelength_for_accessors(single_result)
+      
+      # Now use the standard get_colleague_format_single
+      colleague_data <- get_colleague_format_single(adapted_result, include_untreated, 
+                                                    export_to_csv, wavelength)
+      return(colleague_data)
     }
     
   } else {
-    # Single wavelength results - use original function with error handling
+    # Single wavelength results - use original function
     tryCatch({
       colleague_data <- get_colleague_format_single(results, include_untreated, export_to_csv)
       return(colleague_data)
@@ -10432,7 +10439,10 @@ show_growth_curves(r1, wavelength = "600")
 show_concentrations_panel(r1, wavelength = "600")
 show_plate_composite(r1, wavelength = "600")
 
-get_colleague_format(r1)
+r1_out <- get_colleague_format(r1, wavelength = "600")
+
+r1_out$samples$AVERAGE_Conc_4
+
 
 
 
