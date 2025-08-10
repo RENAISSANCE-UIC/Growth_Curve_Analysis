@@ -1188,7 +1188,7 @@ server <- function(input, output, session) {
   
   # Stop & Save button handler
   observeEvent(input$stopAndSave, {
-    cat("🛑 Stop & Save button clicked\n")
+    cat("Stop & Save button clicked\n")
     
     # Get the result and signal files from environment
     result_file <- Sys.getenv("PLATE_RESULT_FILE")
@@ -1207,16 +1207,16 @@ server <- function(input, output, session) {
           } else {
             write.csv(final_data, capture_file, row.names = FALSE, na = "")
           }
-          cat("📋 Layout saved to:", capture_file, "\n")
+          cat("Layout saved to:", capture_file, "\n")
         }
         
         # Save to result file (RDS) for function return
         if (result_file != "") {
           saveRDS(final_data, result_file)
-          cat("📦 Result saved for function return\n")
+          cat("Result saved for function return\n")
         }
       } else {
-        cat("⚠️ No layout data to save\n")
+        cat("No layout data to save\n")
         if (result_file != "") {
           saveRDS(NULL, result_file)
         }
@@ -1238,7 +1238,7 @@ server <- function(input, output, session) {
       ))
       
     }, error = function(e) {
-      cat("❌ Error saving layout:", e$message, "\n")
+      cat("Error saving layout:", e$message, "\n")
       showModal(modalDialog(
         title = "Error Saving Data",
         paste("There was an error saving your data:", e$message),
@@ -1280,7 +1280,7 @@ server <- function(input, output, session) {
       
       # Only save if signal file doesn't exist (meaning Stop & Save wasn't used)
       if (signal_file != "" && !file.exists(signal_file)) {
-        cat("🔄 App stopping, saving data...\n")
+        cat("App stopping, saving data...\n")
         
         tryCatch({
           # Try to get the latest export data
@@ -1299,19 +1299,19 @@ server <- function(input, output, session) {
               } else {
                 write.csv(final_data, capture_file, row.names = FALSE, na = "")
               }
-              cat("📋 Layout auto-saved to:", capture_file, "\n")
+              cat("Layout auto-saved to:", capture_file, "\n")
             }
             
             # Save to result file (RDS) for function return
             if (result_file != "") {
               saveRDS(final_data, result_file)
-              cat("📦 Result saved for function return\n")
+              cat("Result saved for function return\n")
             }
           } else {
-            cat("⚠️ No layout data to save\n")
+            cat("No layout data to save\n")
             if (result_file != "") {
               saveRDS(NULL, result_file)
-              cat("📦 NULL result saved (no layout created)\n")
+              cat("NULL result saved (no layout created)\n")
             }
           }
           
@@ -1322,7 +1322,7 @@ server <- function(input, output, session) {
           }
           
         }, error = function(e) {
-          cat("❌ Error auto-saving layout:", e$message, "\n")
+          cat("Error auto-saving layout:", e$message, "\n")
           if (result_file != "") {
             saveRDS(NULL, result_file)
           }
@@ -1331,7 +1331,7 @@ server <- function(input, output, session) {
           }
         })
         
-        cat("🔄 Data saving complete\n")
+        cat("Data saving complete\n")
       }
     })
   }
